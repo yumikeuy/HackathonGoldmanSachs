@@ -1,0 +1,227 @@
+package com.hackathon.alerting.common.security;
+
+import com.hackathon.alerting.support.KafkaTestConfiguration;
+import com.hackathon.alerting.support.PostgresTestConfiguration;
+import com.hackathon.alerting.support.RedisTestConfiguration;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
+import org.springframework.messaging.simp.stomp.StompHeaders;
+import org.springframework.messaging.simp.stomp.StompSession;
+import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.socket.WebSocketHttpHeaders;
+import org.springframework.web.socket.client.standard.StandardWebSocketClient;
+import org.springframework.web.socket.messaging.WebSocketStompClient;
+import tools.jackson.databind.JsonNode;
+
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/** UI login with {@code alerting.security.jwt.enabled=true}: tokens, roles, rotation, signed links, WebSocket. */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        "alerting.security.jwt.enabled=true",
+        "alerting.security.admin.password=test-admin-password"})
+@Import({PostgresTestConfiguration.class, KafkaTestConfiguration.class, RedisTestConfiguration.class})
+class AuthIntegrationTest {
+
+    static final String ADMIN_EMAIL = "admin@alerting.local";
+    static final String ADMIN_PASSWORD = "test-admin-password";
+
+    @Value("${local.server.port}")
+    private int port;
+
+    private RestClient http() {
+        return RestClient.builder().baseUrl("http://localhost:" + port)
+                .defaultStatusHandler(HttpStatusCode::isError, (request, response) -> { })
+                .build();
+    }
+
+    @Test
+    void apiRequiresATokenAndRolesDecideWhatIsAllowed() {
+        assertThat(status("GET", "/api/teams", null, null)).isEqualTo(401);
+        assertThat(http().get().uri("/api/teams").retrieve().toEntity(JsonNode.class).getHeaders()
+                .getContentType().isCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)).isTrue();
+
+        String admin = login(ADMIN_EMAIL, ADMIN_PASSWORD).get("accessToken").asString();
+        assertThat(status("GET", "/api/teams", admin, null)).isEqualTo(200);
+        long teamId = http().post().uri("/api/teams").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("name", "Team " + UUID.randomUUID()))
+                .retrieve().body(JsonNode.class).get("id").asLong();
+
+        String viewer = createUserAndLogin(admin, teamId, "VIEWER");
+        String operator = createUserAndLogin(admin, teamId, "OPERATOR");
+
+        assertThat(status("GET", "/api/alerts?teamId=" + teamId, viewer, null)).isEqualTo(200);
+        assertThat(status("POST", "/api/teams", viewer, Map.of("name", "x"))).isEqualTo(403);
+        assertThat(status("POST", "/api/alerts/999999/ack", viewer, Map.of())).isEqualTo(403);
+        // OPERATOR passes the role check; the alert just does not exist
+        assertThat(status("POST", "/api/alerts/999999/ack", operator, Map.of())).isEqualTo(404);
+        assertThat(status("POST", "/api/teams", operator, Map.of("name", "x"))).isEqualTo(403);
+
+        JsonNode me = http().get().uri("/api/auth/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + operator)
+                .retrieve().body(JsonNode.class);
+        assertThat(me.get("role").asString()).isEqualTo("OPERATOR");
+        assertThat(me.get("teamId").asLong()).isEqualTo(teamId);
+
+        assertThat(status("GET", "/api/teams", "not.a.jwt", null)).isEqualTo(401);
+    }
+
+    @Test
+    void refreshTokensRotateAndLogoutRevokes() {
+        JsonNode first = login(ADMIN_EMAIL, ADMIN_PASSWORD);
+        String refresh1 = first.get("refreshToken").asString();
+
+        JsonNode second = refresh(refresh1);
+        assertThat(second.get("accessToken").asString()).isNotBlank();
+        String refresh2 = second.get("refreshToken").asString();
+        assertThat(refresh2).isNotEqualTo(refresh1);
+
+        assertThat(refreshStatus(refresh1)).as("a used refresh token is dead").isEqualTo(401);
+        assertThat(http().post().uri("/api/auth/logout").header(HttpHeaders.AUTHORIZATION, "Bearer " + second.get("accessToken").asString())
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("refreshToken", refresh2)).retrieve().toBodilessEntity()
+                .getStatusCode().value()).isEqualTo(204);
+        assertThat(refreshStatus(refresh2)).as("logged out").isEqualTo(401);
+    }
+
+    @Test
+    void deactivatedUsersCannotRefreshAndPasswordsAreNeverReturned() {
+        String admin = login(ADMIN_EMAIL, ADMIN_PASSWORD).get("accessToken").asString();
+        long teamId = http().post().uri("/api/teams").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("name", "Team " + UUID.randomUUID()))
+                .retrieve().body(JsonNode.class).get("id").asLong();
+        String email = UUID.randomUUID() + "@bank.example";
+        JsonNode user = http().post().uri("/api/users").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("teamId", teamId, "name", "Eve", "email", email, "password", "correct-horse", "role", "OPERATOR"))
+                .retrieve().body(JsonNode.class);
+        assertThat(user.toString()).doesNotContain("correct-horse").doesNotContain("passwordHash");
+        assertThat(user.get("canLogIn").asBoolean()).isTrue();
+
+        String refresh = login(email, "correct-horse").get("refreshToken").asString();
+        http().put().uri("/api/users/{id}", user.get("id").asLong()).header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("teamId", teamId, "name", "Eve", "email", email, "active", false)).retrieve().toBodilessEntity();
+
+        assertThat(refreshStatus(refresh)).isEqualTo(401);
+        assertThat(loginStatus(email, "correct-horse")).isEqualTo(401);
+    }
+
+    @Test
+    void wrongPasswordsAreRefusedAndBruteForceIsThrottled() {
+        String email = "nobody-" + UUID.randomUUID() + "@bank.example";
+        for (int i = 0; i < LoginRateLimiter.MAX_ATTEMPTS; i++) {
+            assertThat(loginStatus(email, "guess-" + i)).isEqualTo(401);
+        }
+        assertThat(loginStatus(email, "guess-x")).isEqualTo(429);
+    }
+
+    @Test
+    void ingestHealthAndDocsStayOpen() {
+        String admin = login(ADMIN_EMAIL, ADMIN_PASSWORD).get("accessToken").asString();
+        String source = "open-" + UUID.randomUUID();
+        http().post().uri("/api/sources").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("name", source, "type", "http")).retrieve().toBodilessEntity();
+
+        assertThat(status("POST", "/api/ingest/" + source, null, Map.of("a", 1))).isEqualTo(202);
+        assertThat(status("GET", "/actuator/health", null, null)).isEqualTo(200);
+        assertThat(status("GET", "/v3/api-docs", null, null)).isEqualTo(200);
+    }
+
+    @Test
+    void runbookFilesNeedATokenOrAValidSignedLink() {
+        String admin = login(ADMIN_EMAIL, ADMIN_PASSWORD).get("accessToken").asString();
+        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+        form.add("file", new ByteArrayResource("1. Restart".getBytes(StandardCharsets.UTF_8)) {
+            @Override
+            public String getFilename() {
+                return "restart.txt";
+            }
+        });
+        long id = http().post().uri("/api/runbooks").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .contentType(MediaType.MULTIPART_FORM_DATA).body(form).retrieve().body(JsonNode.class).get("id").asLong();
+
+        assertThat(status("GET", "/api/runbooks/" + id + "/file", null, null)).isEqualTo(401);
+        assertThat(status("GET", "/api/runbooks/" + id + "/file", admin, null)).isEqualTo(200);
+
+        String url = http().get().uri("/api/auth/runbook-links/{id}", id).header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .retrieve().body(JsonNode.class).get("url").asString();
+        assertThat(status("GET", url, null, null)).isEqualTo(200);
+        assertThat(status("GET", url.replace("sig=", "sig=x"), null, null)).isEqualTo(401);
+        assertThat(status("GET", url.replace("/" + id + "/", "/" + (id + 1) + "/"), null, null)).as("other file").isEqualTo(401);
+    }
+
+    @Test
+    void liveFeedRequiresATokenOnStompConnect() throws Exception {
+        WebSocketStompClient stomp = new WebSocketStompClient(new StandardWebSocketClient());
+        String url = "ws://localhost:" + port + "/ws";
+
+        StompHeaders anonymous = new StompHeaders();
+        assertThatThrownBy(() -> stomp.connectAsync(url, new WebSocketHttpHeaders(), anonymous, new StompSessionHandlerAdapter() { })
+                .get(10, TimeUnit.SECONDS)).isInstanceOf(ExecutionException.class);
+
+        StompHeaders authenticated = new StompHeaders();
+        authenticated.add("Authorization", "Bearer " + login(ADMIN_EMAIL, ADMIN_PASSWORD).get("accessToken").asString());
+        StompSession session = stomp.connectAsync(url, new WebSocketHttpHeaders(), authenticated, new StompSessionHandlerAdapter() { })
+                .get(10, TimeUnit.SECONDS);
+        assertThat(session.isConnected()).isTrue();
+        session.disconnect();
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private String createUserAndLogin(String adminToken, long teamId, String role) {
+        String email = role.toLowerCase() + "-" + UUID.randomUUID() + "@bank.example";
+        int created = http().post().uri("/api/users").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("teamId", teamId, "name", role, "email", email, "password", "password-" + role, "role", role))
+                .retrieve().toBodilessEntity().getStatusCode().value();
+        assertThat(created).isEqualTo(201);
+        return login(email, "password-" + role).get("accessToken").asString();
+    }
+
+    private JsonNode login(String email, String password) {
+        var response = http().post().uri("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("email", email, "password", password)).retrieve().toEntity(JsonNode.class);
+        assertThat(response.getStatusCode().value()).as("login " + email).isEqualTo(200);
+        return response.getBody();
+    }
+
+    private int loginStatus(String email, String password) {
+        return http().post().uri("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("email", email, "password", password)).retrieve().toBodilessEntity().getStatusCode().value();
+    }
+
+    private JsonNode refresh(String refreshToken) {
+        return http().post().uri("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("refreshToken", refreshToken)).retrieve().body(JsonNode.class);
+    }
+
+    private int refreshStatus(String refreshToken) {
+        return http().post().uri("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("refreshToken", refreshToken)).retrieve().toBodilessEntity().getStatusCode().value();
+    }
+
+    private int status(String method, String uri, String token, Object body) {
+        var spec = http().method(org.springframework.http.HttpMethod.valueOf(method)).uri(uri)
+                .headers(h -> { if (token != null) h.setBearerAuth(token); });
+        if (body != null) {
+            spec = spec.contentType(MediaType.APPLICATION_JSON).body(new HashMap<>((Map<?, ?>) body));
+        }
+        return spec.retrieve().toBodilessEntity().getStatusCode().value();
+    }
+}

@@ -4,6 +4,18 @@
 spring:
   application:
     name: alerting-service
+  autoconfigure:
+    # Security is configured explicitly by common.security.SecurityConfig (@EnableWebSecurity), switched by
+    # alerting.security.jwt.enabled. Boot's defaults would lock every endpoint — also in @WebMvcTest slices,
+    # which do not load SecurityConfig — so they are off.
+    exclude:
+      - org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration
+      - org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+      - org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterAutoConfiguration
+      - org.springframework.boot.security.autoconfigure.web.servlet.ServletWebSecurityAutoConfiguration
+      - org.springframework.boot.security.autoconfigure.actuate.web.servlet.ManagementWebSecurityAutoConfiguration
+      - org.springframework.boot.security.oauth2.server.resource.autoconfigure.OAuth2ResourceServerAutoConfiguration
+      - org.springframework.boot.security.oauth2.server.resource.autoconfigure.web.OAuth2ResourceServerWebSecurityAutoConfiguration
   datasource:
     # statement_timeout 5 s, lock_timeout 2 s (AGENTS.md §6 "DB protection")
     url: jdbc:postgresql://${DB_HOST:localhost}:5432/alerts?reWriteBatchedInserts=true&options=-c%20statement_timeout%3D5000%20-c%20lock_timeout%3D2000
@@ -95,6 +107,17 @@ alerting:
     # Browser origins allowed to call /api and open /ws cross-origin (the UI served by the service is same-origin).
     # Comma-separated patterns.
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
+    jwt:
+      # UI login (docs/security.md). false: every request is allowed as before; the login API still works.
+      enabled: ${JWT_ENABLED:false}
+      # HS256 key, at least 32 bytes. The default is for local development only.
+      secret: ${JWT_SECRET:dev-only-secret-change-me-in-production-0123456789}
+      access-ttl: 15m
+      refresh-ttl: 7d
+    admin:
+      # Built-in administrator for the first login on an empty database
+      email: ${ADMIN_EMAIL:admin@alerting.local}
+      password: ${ADMIN_PASSWORD:admin}
   file-source:
     # How often file sources (type "file") check their file for new lines
     poll-interval: 500ms

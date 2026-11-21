@@ -38,6 +38,9 @@ tr -d '\n' < backend/src/test/resources/events/pricing-workflow-failed.json | do
 echo "$(date -u +%FT%TZ) ERROR payment-service: connection pool exhausted" >> infra/logs/app.log
 ```
 
+Login is off by default; `JWT_ENABLED=true docker compose up -d` enforces it (admin `admin@alerting.local` / `admin`,
+seeded users `demo-password`) — see [docs/security.md](docs/security.md).
+
 Then watch the alerts in the UI (or `GET /api/alerts`) and the notifications in MailHog and
 `GET /api/simulator/deliveries`.
 
@@ -47,7 +50,7 @@ Then watch the alerts in the UI (or `GET /api/alerts`) and the notifications in 
 |---|---|---|
 | Ingest, sources, delivery, simulator | [docs/ingest-delivery.md](docs/ingest-delivery.md) | Role 1 |
 | Running, configuration, seed, smoke, metrics, troubleshooting | [docs/operations.md](docs/operations.md) | Role 1 |
-| Security: threat model, source API keys, safe downloads, limits | [docs/security.md](docs/security.md) | Role 1 |
+| Security: threat model, login (JWT) and roles, source API keys, safe downloads, limits | [docs/security.md](docs/security.md) | Role 1 |
 | Event processing, deduplication, alerts | [docs/processing.md](docs/processing.md) | Role 2 |
 | Event generator and load testing | [docs/load-testing.md](docs/load-testing.md) | Role 2 |
 | Condition language | [docs/conditions.md](docs/conditions.md) | Role 3 |

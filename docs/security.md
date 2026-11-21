@@ -1,8 +1,8 @@
 # Security
 
 > Owner: **Role 1**. Threat model, what protects against what, how to configure and how to show it in the demo.
-> Code: `common.web` (headers, safe downloads, errors), `common.config` (CORS, WebSocket origins),
-> `ingest.source` (payload limits, rate limit, source API keys).
+> Code: `common.security` (login, tokens, roles), `common.web` (headers, safe downloads, errors),
+> `common.config` (CORS, WebSocket origins), `ingest.source` (payload limits, rate limit, source API keys).
 
 ## Threat model
 
@@ -18,10 +18,12 @@ in a browser. The realistic attacks, and what stops them:
 | 5 | **Cross-site reading** of the live alert feed or the API from a foreign page in an operator's browser | `/ws`, `/api/**` | **origin allow-list** for WebSocket and CORS (`alerting.security.allowed-origins`) |
 | 6 | **Clickjacking**, MIME confusion | all pages | `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`, strict CSP on `/api/**` |
 | 7 | **Information leakage** through management endpoints | `/actuator` | only `health` (no details) and `prometheus` exposed; `info` and everything else off |
+| 8 | **Anyone changes rules or reads alerts** through the UI/API | `/api/**`, `/ws` | **login with JWT** and **roles** VIEWER / OPERATOR / ADMIN (when `JWT_ENABLED=true`) |
+| 9 | **Stolen refresh token** reused | `/api/auth/refresh` | refresh tokens are **one-time** (rotation), stored as SHA-256, revoked on logout and when the user is deactivated |
+| 10 | **Password guessing** | `/api/auth/login` | BCrypt hashes, 10 attempts per email per minute (429), same timing for unknown emails |
 
-Accepted for the hackathon, not covered here: user login and roles for the UI (planned as an opt-in JWT layer,
-see below), TLS (terminated by the platform in front of the service), secrets management (compose uses development
-passwords).
+Accepted for the hackathon, not covered here: TLS (terminated by the platform in front of the service), secrets
+management (compose uses development defaults — set `JWT_SECRET` and `ADMIN_PASSWORD`).
 
 ## Source API keys
 
@@ -71,6 +73,10 @@ For the UI (Role 4): render event payloads and runbook Markdown as text or throu
 | `alerting.ingest.max-json-depth` | — | `64` | deeper JSON → 400 |
 | `alerting.ingest.rate-limit-per-second` | `INGEST_RATE_LIMIT` | `1000` | per HTTP source; `0` disables |
 | `alerting.security.allowed-origins` | `ALLOWED_ORIGINS` | `http://localhost:*,http://127.0.0.1:*` | browser origins allowed cross-origin on `/api/**` and `/ws`; the UI served by the service is same-origin |
+| `alerting.security.jwt.enabled` | `JWT_ENABLED` | `false` | enforce login on `/api/**` and `/ws` |
+| `alerting.security.jwt.secret` | `JWT_SECRET` | dev value (warning logged) | HS256 key, ≥ 32 bytes; also keys the signed runbook links |
+| `alerting.security.jwt.access-ttl` / `refresh-ttl` | — | `15m` / `7d` | token lifetimes |
+| `alerting.security.admin.email` / `password` | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@alerting.local` / `admin` (warning logged) | built-in administrator |
 
 Rejections are counted in `alerting.ingest.rejected{reason}` with reasons `unauthorized`, `rate_limited`,
 `too_large`, `invalid_json`, `unknown_source`, `kafka_unavailable`.
@@ -82,12 +88,55 @@ Rejections are counted in `alerting.ingest.rejected{reason}` with reasons `unaut
    nothing runs; a normal `.txt` runbook opens inline.
 3. `curl` a 2 MB event → **413**; `[[[[…]]]]` 200 levels deep → **400**; the service keeps working.
 4. A burst over the rate limit → **429** with `Retry-After`, other sources unaffected.
+5. `JWT_ENABLED=true docker compose up -d` → the API answers **401** without a token; log in as Piotr (VIEWER) → can
+   see alerts, `POST /api/rules` → **403**; as Anna (OPERATOR) → can ack; refresh token used twice → second time **401**.
 
-## Next layer (planned, opt-in)
+## Login: JWT access + refresh tokens
 
-UI login with JWT and roles (`VIEWER` read-only, `OPERATOR` ack/resolve, `ADMIN` configuration), including the
-WebSocket handshake — behind `alerting.security.jwt.enabled` (default off) so the UI and scripts keep working until
-the frontend has a login screen. Event sources keep using API keys, not user tokens.
+Switched by `JWT_ENABLED` (`alerting.security.jwt.enabled`, default **false**). Off: every request is allowed as
+before, but the login API already works, so the UI can be built against it. On: `/api/**` needs
+`Authorization: Bearer <access token>`.
+
+```bash
+curl -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+     -d '{"email":"admin@alerting.local","password":"admin"}'
+# {"accessToken":"eyJ…","refreshToken":"rt_…","tokenType":"Bearer","expiresIn":900,"user":{"role":"ADMIN",…}}
+
+curl localhost:8080/api/teams -H 'Authorization: Bearer eyJ…'
+curl -X POST localhost:8080/api/auth/refresh -H 'Content-Type: application/json' -d '{"refreshToken":"rt_…"}'
+curl -X POST localhost:8080/api/auth/logout  -H 'Authorization: Bearer eyJ…' -H 'Content-Type: application/json' \
+     -d '{"refreshToken":"rt_…"}'
+```
+
+| Token | Lifetime | Stored | Notes |
+|---|---|---|---|
+| access (JWT, HS256) | 15 min | nowhere — verified by signature | claims `sub`, `role`, `email`, `name`, `teamId`, `iss`, `exp`, `jti` |
+| refresh (random 256 bit) | 7 days | Redis `auth:refresh:{sha256}` → user | **one-time**: `/refresh` returns a new pair and deletes the old one (`GETDEL`); `/logout` deletes it; a deactivated user or one without a password cannot refresh |
+
+**Who logs in:** users with an email and a password (`password` in `POST/PUT /api/users`, stored as BCrypt;
+`""` disables login; it is never returned — `canLogIn` instead), plus the built-in administrator
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` for the first login on an empty database.
+
+**Roles** (each includes the ones below):
+
+| Role | May |
+|---|---|
+| `VIEWER` | every `GET /api/**`, rule dry-run, live feed |
+| `OPERATOR` | + ack, resolve, replay failed events |
+| `ADMIN` | + every other change: sources, teams, users, rules, runbooks, simulator switches, generator |
+
+Always open: `POST /api/auth/login|refresh`, `POST /api/ingest/{source}` (source API keys instead), UI pages, Swagger,
+`/actuator/health`. Errors: 401 (no/invalid token) and 403 (role too low) as problem+json.
+
+**WebSocket:** browsers cannot set headers on the handshake, so the token goes into the STOMP `CONNECT` frame as the
+native header `Authorization: Bearer …`; without it the connection is refused.
+
+**Runbook links:** a link in an email has no token, so with login enforced notifications carry a **signed link**
+(`/api/runbooks/{id}/file?exp=…&sig=…`, HMAC-SHA256, 7 days, only that file). The UI gets a 5-minute one from
+`GET /api/auth/runbook-links/{id}` to open a file in a new tab; or it downloads with the bearer token.
+
+For the UI (Role 4): keep the access token in memory, the refresh token in `sessionStorage` (or memory), call
+`/refresh` on a 401 once, then send the user to the login page.
 
 Also recommended to Role 3: a time limit on `regex` conditions (catastrophic backtracking, ReDoS) and rejecting
 control characters in uploaded file names.

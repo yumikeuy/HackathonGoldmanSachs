@@ -7,6 +7,7 @@
 # is available), appends a line to infra/logs/app.log (file source), then checks through the API that alerts exist
 # with the right team and severity, that an email reached MailHog and that a repeated event increases
 # occurrencesCount. Exits with a non-zero code on the first failure. Needs bash and curl only.
+# Works with and without enforced login (logs in as ADMIN_EMAIL / ADMIN_PASSWORD; ingest itself needs no token).
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
@@ -19,12 +20,23 @@ RUN_ID="smoke-$(date +%s)-$RANDOM"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@alerting.local}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}"
+AUTH=()
 passed=0
 ok()   { passed=$((passed + 1)); printf '  ok   %s\n' "$*"; }
 fail() { printf '  FAIL %s\n' "$*" >&2; exit 1; }
 step() { printf '\n%s\n' "$*"; }
 
-get() { curl -sS -o "$TMP" -w '%{http_code}' "$BASE_URL$1"; }
+get() { curl -sS -o "$TMP" -w '%{http_code}' ${AUTH[@]+"${AUTH[@]}"} "$BASE_URL$1"; }
+
+login() {
+  local status
+  status="$(curl -sS -o "$TMP" -w '%{http_code}' -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
+            --data-binary "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")"
+  [ "$status" = "200" ] && AUTH=(-H "Authorization: Bearer $(grep -o '"accessToken":"[^"]*"' "$TMP" | sed 's/.*:"//; s/"$//')")
+  return 0
+}
 
 ingest() {
   local source="$1" file="$2" status
@@ -70,6 +82,7 @@ expect_alert() {
 
 step "Service"
 curl -sf "$BASE_URL/actuator/health" > /dev/null || fail "$BASE_URL is not up (docker compose up --build -d)"
+login
 RATES="$(team_id "Team Rates")"; PRICING="$(team_id "Team Pricing")"; INFRA="$(team_id "Team Infra")"
 [ -n "$RATES" ] && [ -n "$PRICING" ] && [ -n "$INFRA" ] || fail "teams missing — run infra/seed/seed.sh first"
 ok "up and seeded (teams $RATES, $PRICING, $INFRA)"
@@ -92,7 +105,7 @@ fi
 # so this run's line opens (and emails) a new alert.
 if [ "$(get "/api/alerts?limit=200&teamId=$INFRA&status=OPEN&status=ACKED")" = "200" ]; then
   for id in $(grep -o '{[^{}]*}' "$TMP" | grep -F '[smoke-' | grep -o '^{"id":[0-9]*' | grep -o '[0-9][0-9]*'); do
-    curl -sS -o /dev/null -X POST "$BASE_URL/api/alerts/$id/resolve" -H 'Content-Type: application/json' \
+    curl -sS -o /dev/null -X POST "$BASE_URL/api/alerts/$id/resolve" ${AUTH[@]+"${AUTH[@]}"} -H 'Content-Type: application/json' \
          -d '{"actor":"smoke-test"}'
   done
 fi

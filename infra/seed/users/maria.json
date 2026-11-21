@@ -1,3 +1,4 @@
 {"teamId": __TEAM_ID__, "name": "Maria Schmidt", "email": "maria.schmidt@bank.example", "phone": "+49 151 100 003",
  "timezone": "Europe/Berlin",
- "channelPreferences": [{"channel": "CALL", "hours": "22-07"}, {"channel": "EMAIL", "hours": "00-24"}]}
+ "channelPreferences": [{"channel": "CALL", "hours": "22-07"}, {"channel": "EMAIL", "hours": "00-24"}],
+ "role": "OPERATOR", "password": "demo-password"}

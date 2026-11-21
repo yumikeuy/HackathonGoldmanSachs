@@ -5,7 +5,8 @@
 #
 # Idempotent: anything that already exists (same source/team name, user email, rule name in the team,
 # runbook file name) is left alone, so a second run changes nothing. Needs bash and curl only.
-# BASE_URL (default http://localhost:8080) points at the service.
+# BASE_URL (default http://localhost:8080) points at the service. Works with and without enforced login: it logs in
+# as the built-in administrator (ADMIN_EMAIL / ADMIN_PASSWORD, defaults admin@alerting.local / admin) and sends the token.
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
@@ -14,6 +15,10 @@ ROOT_DIR="$(cd "$SEED_DIR/../.." && pwd)"
 RUNBOOK_DIR="$ROOT_DIR/backend/src/test/resources/runbooks"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
+
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@alerting.local}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin}"
+AUTH=()
 
 created=0
 skipped=0
@@ -24,7 +29,20 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # request METHOD PATH [curl args...] — body goes to $TMP, prints the HTTP status
 request() {
   local method="$1" path="$2"; shift 2
-  curl -sS -o "$TMP" -w '%{http_code}' -X "$method" "$BASE_URL$path" "$@"
+  curl -sS -o "$TMP" -w '%{http_code}' -X "$method" "$BASE_URL$path" ${AUTH[@]+"${AUTH[@]}"} "$@"
+}
+
+# login — fills AUTH with the admin's bearer token (needed when the service runs with JWT_ENABLED=true)
+login() {
+  local status
+  status="$(request POST /api/auth/login -H 'Content-Type: application/json' \
+            --data-binary "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")"
+  if [ "$status" = "200" ]; then
+    AUTH=(-H "Authorization: Bearer $(grep -o '"accessToken":"[^"]*"' "$TMP" | sed 's/.*:"//; s/"$//')")
+    say "Logged in as $ADMIN_EMAIL"
+  else
+    say "Login as $ADMIN_EMAIL failed (HTTP $status) — continuing without a token (fine unless JWT_ENABLED=true)"
+  fi
 }
 
 # post_json PATH FILE [TEAM_ID] — POST a JSON body, replacing __TEAM_ID__; prints the HTTP status
@@ -121,6 +139,7 @@ seed_runbook() {
 }
 
 wait_for_service
+login
 
 say "Sources"
 for file in "$SEED_DIR"/sources/*.json; do seed_source "$file"; done
@@ -150,3 +169,5 @@ mkdir -p "$ROOT_DIR/infra/logs" && touch "$ROOT_DIR/infra/logs/app.log"
 say ""
 say "Done: $created created, $skipped already existed."
 say "UI $BASE_URL  ·  Swagger $BASE_URL/swagger-ui.html  ·  MailHog http://localhost:8025"
+say "Logins (password 'demo-password'): anna.kowalska@ / maria.schmidt@bank.example (OPERATOR),"
+say "  piotr.nowak@bank.example (VIEWER), john.smith@bank.example (ADMIN); built-in admin $ADMIN_EMAIL"

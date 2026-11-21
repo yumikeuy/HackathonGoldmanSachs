@@ -1,7 +1,9 @@
 package com.hackathon.alerting.common.config;
 
+import com.hackathon.alerting.common.security.StompAuthInterceptor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
@@ -23,9 +25,18 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public static final String ENDPOINT = "/ws";
 
     private final String[] allowedOrigins;
+    private final StompAuthInterceptor stompAuth;
 
-    public WebSocketConfig(@Value("${alerting.security.allowed-origins}") String[] allowedOrigins) {
+    public WebSocketConfig(@Value("${alerting.security.allowed-origins}") String[] allowedOrigins,
+                           StompAuthInterceptor stompAuth) {
         this.allowedOrigins = allowedOrigins;
+        this.stompAuth = stompAuth;
+    }
+
+    /** With login enabled, CONNECT needs an access token ({@link StompAuthInterceptor}). */
+    @Override
+    public void configureClientInboundChannel(ChannelRegistration registration) {
+        registration.interceptors(stompAuth);
     }
 
     @Override

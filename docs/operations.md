@@ -43,6 +43,9 @@ overrides the hosts with environment variables.
 | `ALLOWED_ORIGINS` | `alerting.security.allowed-origins` | `http://localhost:*,http://127.0.0.1:*` | browser origins allowed cross-origin (CORS, WebSocket) |
 | — | `alerting.ingest.max-body-size`, `max-json-depth` | `1MB`, 64 | event size and nesting limits |
 
+| `JWT_ENABLED` | `alerting.security.jwt.enabled` | `false` | enforce UI/API login (JWT) |
+| `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | `alerting.security.*` | dev defaults | token key and the built-in administrator — change outside development |
+
 Security settings and their reasons: [security.md](security.md).
 
 ## Seed data
@@ -56,6 +59,9 @@ Security settings and their reasons: [security.md](security.md).
 | Team Rates | `desk == "rates"`; Anna (SMS 08–20 Warsaw, else email in working hours), Piotr (email any time); rule *Rejected trades* — HIGH, grouped by `instrument`; runbook `trade-rejection.md` |
 | Team Pricing | `team == "pricing"` or `workflow` like `*-pricing`; Maria (call at night 22–07 Berlin, email any time); rule *Failed workflows* — CRITICAL, grouped by `workflow`, auto-resolved by `status == "OK"`; runbook `pricing-workflow-restart.txt` |
 | Team Infra | `metric in [cpu, memory]` or `message` contains `ERROR`; John (email any time); rules *High CPU* (`value > 90`, per host, `per_window`) and *Application errors in logs*; global runbook `high-cpu.yaml` |
+
+The script logs in as the built-in administrator first (works with and without `JWT_ENABLED`). Seeded users can log
+in with the password `demo-password`: Anna and Maria (OPERATOR), Piotr (VIEWER), John (ADMIN).
 
 Idempotent: existing sources, teams, users (by email), rules (by name within the team) and runbooks (by file name) are
 skipped — a second run reports `0 created`. To change seeded data, edit it in the UI/API or wipe with
