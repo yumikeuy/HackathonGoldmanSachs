@@ -2,7 +2,6 @@ package com.hackathon.alerting.runbooks.audit;
 
 import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.rules.repository.AlertRepository;
-import com.hackathon.alerting.runbooks.api.AuditEntry;
 import com.hackathon.alerting.runbooks.repository.AuditLogRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

@@ -2,7 +2,7 @@ package com.hackathon.alerting.runbooks;
 
 import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.runbooks.api.AuditController;
-import com.hackathon.alerting.runbooks.api.AuditEntry;
+import com.hackathon.alerting.runbooks.audit.AuditEntry;
 import com.hackathon.alerting.runbooks.audit.AuditQueryService;
 import com.hackathon.alerting.runbooks.model.AuditActions;
 import org.junit.jupiter.api.Test;

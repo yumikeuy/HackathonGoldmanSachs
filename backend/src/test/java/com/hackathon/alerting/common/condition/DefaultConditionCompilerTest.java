@@ -77,7 +77,9 @@ class DefaultConditionCompilerTest {
         assertThat(compiler.compile(json("{\"path\":\"host\",\"op\":\"glob\",\"value\":\"staging-*\"}"), true).test(event)).isFalse();
 
         assertThat(compiler.compile(json("{\"path\":\"status\",\"op\":\"exists\",\"value\":true}"), true).test(event)).isTrue();
+        assertThat(compiler.compile(json("{\"path\":\"status\",\"op\":\"exists\"}"), true).test(event)).isTrue();
         assertThat(compiler.compile(json("{\"path\":\"nullable\",\"op\":\"exists\",\"value\":true}"), true).test(event)).isFalse();
+        assertThat(compiler.compile(json("{\"path\":\"nullable\",\"op\":\"exists\",\"value\":false}"), true).test(event)).isTrue();
         assertThat(compiler.compile(json("{\"path\":\"missing\",\"op\":\"exists\",\"value\":false}"), true).test(event)).isTrue();
     }
 
@@ -169,6 +171,27 @@ class DefaultConditionCompilerTest {
 
         assertThatThrownBy(() -> compiler.compile(json("{\"and\":[],\"or\":[]}"), false))
                 .isInstanceOf(InvalidConditionException.class);
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"and\":[],\"extra\":1}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("'and'")
+                .hasMessageContaining("must not have other properties");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"or\":[],\"extra\":1}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("'or'")
+                .hasMessageContaining("must not have other properties");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"status\",\"op\":\"exists\",\"vaule\":false}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("Unknown property 'vaule'")
+                .hasMessageContaining("$");
+
+        assertThatThrownBy(() -> compiler.compile(
+                json("{\"and\":[{\"path\":\"a\",\"op\":\"==\",\"value\":1},{\"path\":\"b\",\"op\":\"==\",\"value\":2,\"extra\":true}]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("Unknown property 'extra'")
+                .hasMessageContaining("$.and[1]");
 
         assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"a\"}"), false))
                 .isInstanceOf(InvalidConditionException.class);

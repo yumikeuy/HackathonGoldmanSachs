@@ -763,11 +763,17 @@ components:
     LeafCondition:
       type: object
       required: [path, op]
+      description: >
+        Single field predicate. Unknown properties are rejected with HTTP 400.
+        A missing field or a field whose JSON value is `null` counts as absent:
+        every comparison (including `!=` and `not_in`) evaluates to `false`,
+        `exists` with `value: true` evaluates to `false`, and `exists` with `value: false`
+        evaluates to `true`.
       properties:
         path: { type: string, example: trade.notional }
         op: { $ref: '#/components/schemas/Operator' }
         value:
-          description: Comparison value — string, number, boolean, or an array for `in`/`not_in`; `true` for `exists`.
+          description: Comparison value — string, number, boolean, or an array for `in`/`not_in`; for `exists`, `true` (default if omitted) checks presence and `false` checks absence (including JSON `null`).
 
     # ---------------- ingest
     IngestAccepted:

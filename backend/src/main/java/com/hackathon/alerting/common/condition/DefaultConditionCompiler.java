@@ -7,6 +7,7 @@ import tools.jackson.databind.JsonNode;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -82,6 +83,12 @@ public class DefaultConditionCompiler implements ConditionCompiler {
     }
 
     private Predicate<JsonNode> compileLeaf(JsonNode node, String where, boolean strict) {
+        for (Map.Entry<String, JsonNode> entry : node.properties()) {
+            String key = entry.getKey();
+            if (!"path".equals(key) && !"op".equals(key) && !"value".equals(key)) {
+                throw new InvalidConditionException("Unknown property '" + key + "' in condition leaf at " + where);
+            }
+        }
         JsonNode pathNode = node.get("path");
         JsonNode opNode = node.get("op");
         if (pathNode == null || !pathNode.isString() || pathNode.asString().isBlank()

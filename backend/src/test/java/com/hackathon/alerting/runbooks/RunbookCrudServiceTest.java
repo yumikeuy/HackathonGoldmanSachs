@@ -201,6 +201,16 @@ class RunbookCrudServiceTest {
     }
 
     @Test
+    void stripsWindowsDirectorySeparatorsFromUploadedFileName() {
+        MockMultipartFile windowsFile = new MockMultipartFile(
+                "file", "C:\\Users\\ops\\win-restart.pdf", "application/pdf", "%PDF".getBytes(StandardCharsets.UTF_8));
+
+        RunbookDto created = service.create(windowsFile, null, null);
+
+        assertThat(created.fileName()).isEqualTo("win-restart.pdf");
+    }
+
+    @Test
     void publishesRunbooksConfigChangedAfterCommit() {
         MockMultipartFile valid = new MockMultipartFile("file", "ok.txt", "text/plain", "ok".getBytes(StandardCharsets.UTF_8));
         RunbookDto created = service.create(valid, null, null);
