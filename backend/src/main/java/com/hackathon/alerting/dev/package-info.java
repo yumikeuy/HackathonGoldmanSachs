@@ -1,4 +1,4 @@
 /**
- * Developer tools: the test event generator ({@code POST /api/dev/generate}). Owner: Role 3.
+ * Developer tools: the test event generator (POST /api/dev/generate), switched by alerting.dev.generator-enabled. Owner: Role 2.
  */
 package com.hackathon.alerting.dev;

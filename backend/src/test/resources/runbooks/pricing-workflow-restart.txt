@@ -1,0 +1,6 @@
+RUNBOOK - EOD pricing workflow failed
+
+1. Check the failed step in the alert payload ("step").
+2. If the error mentions a timeout, verify the market-data service is up.
+3. Restart the workflow from the failed step:  pricing-cli restart --workflow eod-pricing --from <step>
+4. If it fails 3 times, page the Pricing on-duty engineer.

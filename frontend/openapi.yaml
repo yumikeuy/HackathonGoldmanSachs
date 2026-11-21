@@ -13,6 +13,8 @@ info:
     - Lists are keyset-paginated: `?cursor=&limit=` → `{ items, nextCursor }`. `nextCursor` is opaque and
       `null` on the last page. Default limit 50, max 200.
     - No authentication. Where an actor is needed (ack/resolve) the UI sends the user's email.
+    - `x-planned: true` on an operation: specified but **not implemented yet** — the UI uses its mock. The owning role
+      removes the marker in the same PR that implements the endpoint; a contract test checks implemented ⇔ not planned.
 
     Live updates (STOMP over plain WebSocket at `/ws`, no SockJS; the UI only subscribes):
     | Destination | Body | Owner |
@@ -36,7 +38,7 @@ tags:
   - name: runbooks
     description: Role 3
   - name: dev
-    description: Test event generator — Role 3
+    description: Test event generator — Role 2
 
 paths:
   # ------------------------------------------------------------------ ingest (Role 1)
@@ -537,6 +539,26 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/AuditEntry' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/alerts/{id}/team-suggestions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [alerts]
+      x-planned: true
+      summary: Teams an UNROUTED alert probably belongs to, best first (Role 2)
+      description: |
+        Helps triage on the unrouted page ("create rule from this event"): ranks teams by how close the
+        alert's sample event comes to each team's condition and by the history of the event's source.
+        Returns an empty list for alerts that already have a team, and at most 5 suggestions.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 5
+                items: { $ref: '#/components/schemas/TeamSuggestion' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------------ runbooks (Role 3)
   /api/runbooks:
@@ -624,6 +646,7 @@ paths:
   /api/dev/generate:
     post:
       tags: [dev]
+      x-planned: true
       summary: Generate test events through the normal ingest path
       requestBody:
         required: true
@@ -822,7 +845,12 @@ components:
         type: { $ref: '#/components/schemas/SourceType' }
         config:
           type: object
-          description: Type-specific settings, e.g. `{"topic":"workflow.events"}` for kafka.
+          description: |
+            Type-specific settings:
+            - `kafka`: `{"topic": "workflow.events"}` — consume this external topic;
+            - `file`: `{"path": "/data/logs/app.log"}` — tail this file (path inside the backend container);
+              each new line is one event: a JSON line as is, any other line as `{"message": "<line>"}`;
+            - `http`: `{}` — events arrive at `POST /api/ingest/{name}`.
           default: {}
         active: { type: boolean, default: true }
     Team:
@@ -1054,6 +1082,21 @@ components:
           type: string
           description: Who acts (email); defaults to `ui`.
           example: anna@bank.com
+    TeamSuggestion:
+      type: object
+      required: [teamId, teamName, score, reason]
+      properties:
+        teamId: { type: integer, format: int64 }
+        teamName: { type: string }
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence, 1 = best.
+        reason:
+          type: string
+          description: Human-readable explanation shown next to the suggestion.
+          example: '3 of 4 conditions match; 120 alerts of this team came from source payments-monitoring'
     AuditEntry:
       type: object
       required: [id, actor, actionType, details, createdAt]

@@ -1,64 +1,45 @@
-# Roles — who builds what, in parallel, without merge conflicts
+# Roles — phase 2: from working pipeline to demo-ready product
 
-This file splits the **first phase** of the work (from now until the end-to-end demo path works) between four people.
-It complements `AGENTS.md` (the source of truth for the domain, schema and architecture) — read that first.
-If the two disagree, `AGENTS.md` wins; fix this file.
+Phase 1 built the pipeline: events of any shape come in over HTTP and Kafka, are routed by conditions, deduplicated into
+alerts, delivered by email/SMS/call/UI and shown live. Phase 2 finishes the backend for the demo: **runbooks**,
+the **event generator and load test**, the **file source**, **seed data, smoke test and documentation**, metrics and
+the **team-suggestion** bonus.
 
-**How parallel work is possible:** step 0 is done. Every place where one role's code calls another's is a Java
-interface with a **working stub**, the REST/WebSocket contract is written down in `frontend/openapi.yaml`, and every
-package and shared file has exactly one owner. Each person writes only in their own packages, codes against the
-interfaces, and replaces only their own stubs. Nobody waits for anybody.
+Three backend roles work in parallel, each **in the packages they already own** — the numbering is the same as in phase 1,
+so nobody moves into someone else's code. The frontend is built by its own person (Role 4) against `frontend/openapi.yaml`.
 
----
-
-## 1. What already exists (step 0, on `main`)
-
-| Area | What | Where |
-|---|---|---|
-| Schema | 9 tables, constraints, indexes (Flyway V1 + V2) | `backend/src/main/resources/db/migration` |
-| Entities | `Team`, `User`, `OutboxTask`, `Source`, `Event`, `Rule`, `Alert`, `Runbook`, `AuditLog` | `*/model` |
-| Repositories | one per entity, incl. hot-path SQL (`AlertRepository.insertIfNoOpenAlert`, `addOccurrences`, `OutboxTaskRepository.lockDueBatch`) | `*/repository` |
-| REST conventions | RFC 9457 errors (`NotFoundException`, `InvalidRequestException`), keyset pages (`CursorPage`, `Cursors`) | `common.web` |
-| WebSocket | STOMP at `/ws`, broker `/topic`, destinations in `WebSocketTopics` | `common.config` |
-| Kafka | topic names and message format (`KafkaTopics`), envelope record `EventEnvelope` | `common.config`, `ingest.envelope` |
-| Config reload | `ConfigChangedPublisher` → `ConfigChangedEvent` (after commit), kinds in `ConfigKinds` | `common.config` |
-| Contracts + stubs | see the table in §2 | |
-| API contract | every REST endpoint + WebSocket messages | `frontend/openapi.yaml` |
-| Sample events | rates / pricing / infra / foreign schema | `backend/src/test/resources/events` |
-| Test infra | `@JpaRepositoryTest`; Postgres, Kafka, Redis containers; `TestData` | `backend/src/test/.../support` |
-
-The application starts and `mvn test` is green.
+`AGENTS.md` stays the source of truth for the domain; if it and this file disagree, `AGENTS.md` wins — fix this file.
+Phase 1's split is in git history (`git show 36d19b8:roles.md`).
 
 ---
 
-## 2. Contracts between roles
+## 1. State at the start of phase 2 (`main`, 95 tests green)
 
-Each interface has one implementation class (the stub). **Its owner fills in that same class** (or renames it inside
-their package) — the interface and the calling code do not change.
+| Area | Status |
+|---|---|
+| Ingest: HTTP, external Kafka, DLT + replay, lag, field catalog, recent events | done (Role 1) |
+| Sources / teams / users CRUD, config reload over Redis | done (Role 1) |
+| Delivery: routing by preferences and hours, outbox worker, retries, rate limit, simulator | done (Role 1) |
+| Processing: routing, fingerprint, dedup, grouping, auto-close, UNROUTED, live push, rules + alerts API | done (Role 2) |
+| Condition engine (all operators, strict / flexible), audit trail + `GET /api/alerts/{id}/audit` | done (Role 3) |
+| **Runbooks API** (CRUD, multipart upload, file download, 413 over 10 MB) | done (Role 3) — branch `role3/runbooks-api`, fixed for today's `main` |
+| **Runbooks**: cache, selection (`RunbookService.attach` is still a no-op) | **phase 2 — Role 3** |
+| **Generator** `POST /api/dev/generate`, **k6 load test** | **phase 2 — Role 2** (moved from Role 3) |
+| **File source** (tail a log file), **seed data**, **smoke test**, **README / docs** | **phase 2 — Role 1** |
+| Metrics, team suggestions for unrouted alerts (bonus), hardening | phase 2 — every role in its area |
+| Frontend | Role 4, in progress separately |
 
-| Interface | Owner | Stub today | Called by |
-|---|---|---|---|
-| `common.condition.ConditionCompiler` — `compile(JsonNode condition, boolean strict) → Predicate<JsonNode>`, throws `InvalidConditionException` (→ 400) | Role 3 | `DefaultConditionCompiler`: `null` → true, `and`/`or`, only `==` by exact path; other ops → 400 | Role 1 (team validation), Role 2 (team/rule cache, dry-run, rule validation), Role 3 (runbooks) |
-| `common.json.JsonFieldLocator` — `find(event, path, strict) → Optional<JsonNode>` | Role 3 | `ExactPathFieldLocator`: exact dotted path | Role 2 (`group_by_paths`), Role 3 |
-| `common.json.TemplateRenderer` — `render("Rejected {{trade.id}}", event)` | Role 3 | `PlaceholderTemplateRenderer`: works, exact paths | Role 2 (alert titles), Role 1 (notification texts) |
-| `runbooks.RunbookService` — `attach(Alert, JsonNode event)` | Role 3 | `DefaultRunbookService`: does nothing | Role 2 (`AlertCreator`) |
-| `runbooks.audit.AuditService` — `log(Long alertId, String actor, String actionType, JsonNode details)` | Role 3 | `DefaultAuditService`: logs only | everyone |
-| `delivery.outbox.OutboxService` — `enqueue(Alert, Rule)` | Role 1 | **done**: `DefaultOutboxService` — UI row + one personal row per active user, channel by preferences / working hours / time zone | Role 2 (`AlertCreator`) |
-| `common.config.ConfigChangedPublisher` — `publish(String what)` | Role 1 | **done**: `RedisConfigChangedPublisher` — Redis `config.changed` after commit, `ConfigChangedSubscriber` re-publishes locally on every instance | everyone with CRUD |
-| `ingest.recent.RecentEvents` — `add(event)`, `latest(limit)` | Role 1 | **done**: `RedisRecentEvents` — `recent:events`, 1000 | Role 2 (dry-run) |
+## 2. Prepared for phase 2 (already on this branch — nobody needs to touch shared files to start)
 
-Listening for configuration changes (all caches):
-
-```java
-@EventListener
-void onConfigChanged(ConfigChangedEvent event) {
-    if (event.is(ConfigKinds.RULES) || event.is(ConfigKinds.TEAMS)) reload();
-}
-```
-
-Kafka `events.ingest`: key = `source_name`, value = JSON string of `EventEnvelope` (snake_case). Producer and consumer
-use plain `String` (de)serializers (Spring Boot defaults) and convert with the injected `JsonMapper` — no shared
-serializer configuration is needed.
+| What | Why it prevents conflicts |
+|---|---|
+| `openapi.yaml`: `GET /api/alerts/{id}/team-suggestions` + schema `TeamSuggestion` | Role 2 implements it, Role 4 builds the UI for it now — same contract |
+| `openapi.yaml`: config format of `file` sources (`{"path": …}`) | Role 1 implements, Role 4 shows the form field |
+| `openapi.yaml`: `x-planned: true` on the operations not implemented yet — the generator and team suggestions (the runbooks API is written, so it carries none) | each role removes **its own** markers when it ships; Role 1's contract test checks "implemented ⇔ not planned" — no shared allow-list to edit |
+| `application.yml`: `alerting.dev.generator-enabled` (`DEV_GENERATOR_ENABLED`, default `true`) | Role 2 needs the switch, Role 1 owns the file |
+| `README.md` (Role 1) + one file per role in `docs/` | everyone documents only their own file |
+| `backend/src/test/resources/runbooks/` — sample runbooks (`.md`, `.txt`, `.yaml`) | used by Role 3's tests and Role 1's seed script |
+| `dev` package now owned by Role 2 | generator moves from Role 3 to Role 2 |
 
 ---
 
@@ -66,242 +47,224 @@ serializer configuration is needed.
 
 | Role | Packages / files (only this role edits them) |
 |---|---|
-| **1. Ingest, delivery, infrastructure** | `ingest.*`, `delivery.*`, `common.config`, `common.web`, `common.persistence`; `pom.xml`, `application.yml`, `docker-compose.yml`, `backend/Dockerfile`, `infra/`; test package `support` |
-| **2. Processing and alerts** | `rules.*` |
-| **3. Conditions, runbooks, audit, tooling** | `common.condition`, `common.json`, `runbooks.*`, `dev`; `loadtest/`, `README.md`, `docs/` |
-| **4. Frontend and demo** | `frontend/` (except `openapi.yaml`, see below), `demo/` |
+| **1. Ingest, delivery, platform** | `ingest.*`, `delivery.*`, `common.config`, `common.web`, `common.persistence`; `pom.xml`, `application.yml`, `docker-compose.yml`, `backend/Dockerfile`, `.dockerignore`, `infra/`; `README.md`, `docs/ingest-delivery.md`, `docs/operations.md`; tests `support/*`, `AlertingApplicationTest`, `ingest/*`, `delivery/*`, `common/config`, `common/web` |
+| **2. Processing, generator, load** | `rules.*`, `dev`; `backend/src/main/resources/dev/`; `loadtest/`; `docs/processing.md`, `docs/load-testing.md`; tests `rules/*`, `dev/*` |
+| **3. Runbooks and conditions** | `runbooks.*`, `common.condition`, `common.json`; `docs/runbooks.md`, `docs/conditions.md`; tests `runbooks/*`, `common/condition`, `common/json`; `test/resources/runbooks/*` and `test/resources/events/*` (others may **add** files) |
+| **4. Frontend and demo** (separate) | `frontend/` except `openapi.yaml`, `demo/` |
 
-Shared by agreement:
+**`frontend/openapi.yaml`** — each tag belongs to the role that implements it: `ingest`, `config`, `simulator` → Role 1;
+`rules`, `alerts` (except `/audit`), `dev` → Role 2; `runbooks`, `/api/alerts/{id}/audit`, the `Condition` schemas → Role 3.
+Edit only your part; announce changes in chat **before** merging (Role 4 regenerates types).
 
-- **Repositories and entities** belong to the table owner (AGENTS.md §8), but any role may **call** any repository.
-  Need a new query in someone else's repository? Ask the owner in chat — it is a two-line change for them.
-  Until then, use an existing method or a query in your own package.
-- **`frontend/openapi.yaml`** — each section belongs to the role that implements it (tags in the file). Change your
-  section only, and announce it in chat **before** merging (Role 4 regenerates types).
-- **`backend/src/test/resources/events/`** — anyone may **add** files; existing ones are changed only by Role 3.
-- **`pom.xml`, `application.yml`** — need a dependency or property? Ask Role 1 in chat; Role 1 merges it quickly.
-  Until it lands, keep the setting local (an annotation attribute, a `@Value` default) instead of editing the file.
-- **Tests** live in the test package of your module (`rules`, `runbooks`, `ingest`, `delivery`, …).
+**`AGENTS.md`** (local, not in git) — each role updates the sections of its area (§3 Redis keys, §4 schema, §5 conditions,
+§12 work log) and shares the file in chat.
 
----
+## 4. What each role uses from the others (all of it exists today)
 
-## 4. Ground rules
+| Used by | Provided by | What |
+|---|---|---|
+| Role 2 (generator) | Role 1 | `ingest.source.EventIngestor.ingest(SourceType, sourceName, payload)` — the real ingest path: Kafka with `acks=all`, recent events, field catalog; throws `ServiceUnavailableException` (503) when Kafka is down. `ingest.source.SourceCache.findActive(name)` — is the source active |
+| Role 2 (alert creation) | Role 3 | `RunbookService.attach(alert, event)` — already called inside `AlertCreator`; it starts attaching once Role 3 ships, no change on Role 2's side |
+| Role 2 (suggestions) | Role 3 | `ConditionCompiler`, `JsonFieldLocator` |
+| Role 1 (notifications) | Role 3 | the runbook link `{public-url}/api/runbooks/{id}/file` — `MessageComposer` already writes it when `alert.runbook` is set |
+| Role 1 (seed script) | Role 3 | `POST /api/runbooks` (multipart) — over HTTP, by the contract in `openapi.yaml` |
+| Role 3 (cache reload) | Role 1 | `ConfigChangedPublisher.publish(ConfigKinds.RUNBOOKS)`, `ConfigChangedEvent` |
+| everyone | Role 1 | `Clock` bean (`common.config.ClockConfig`), errors `NotFoundException` 404, `InvalidRequestException` 400, `ConflictException` 409, `ServiceUnavailableException` 503; `CursorPage` / `Cursors` for lists; test configs `PostgresTestConfiguration`, `KafkaTestConfiguration`, `RedisTestConfiguration`, `@JpaRepositoryTest`, `MutableClock` |
 
-1. **Branches.** One branch per piece of work: `role1/ingest-http`, `role2/processor`, … Merge to `main` in small
-   pieces, at least every ~2 hours. `main` always builds, starts and passes `mvn test`.
-2. **Migrations.** Never edit `V1`/`V2`. New migrations are named by timestamp so branches never collide:
-   `V20261121_1430__rules_add_x.sql` (`spring.flyway.out-of-order: true` is already on). Only for your own tables.
-3. **Contracts change only through their owner**: interface, API section, Kafka/Redis format, tables. Update
-   `AGENTS.md` / `openapi.yaml` and post in chat **before** merging.
-4. **Errors**: throw `NotFoundException` / `InvalidRequestException` (or a subclass) — never hand-build error JSON.
-5. **Lists**: keyset only — `Cursors.decode(cursor)`, `Cursors.limit(limit)`, `CursorPage.of(window, Dto::from)`.
-6. **Hot path**: no configuration reads from the database per event — only caches reloaded on `ConfigChangedEvent`.
-7. **Code**: English comments and commit messages, Jackson 3 (`tools.jackson.*`), constructor injection, entities never
-   leave the service layer (controllers return DTO records matching `openapi.yaml`).
-8. **Build without local Java** (what CI-less step 0 used):
+## 5. Ground rules (unchanged from phase 1)
+
+1. **Branches**: `role1/…`, `role2/…`, `role3/…`; merge to `main` in small PRs, at least every ~2 hours; `main` always
+   builds, starts and passes `mvn test`. **Before opening a PR, merge the current `main` into your branch and run
+   `mvn test`** — git reports no conflict when another role removed or renamed a class you use, only the compiler does
+   (this happened to `role3/runbooks-api`: it referenced a class Role 1 had replaced).
+2. **Migrations**: never edit existing ones; new ones are timestamped — `V20261121_1430__runbooks_add_x.sql` — and only for
+   your own tables.
+3. **Need something in another role's file** (a repository method, a property, a dependency)? Ask the owner in chat.
+4. **Time**: inject `Clock`, never `Instant.now()`. **Errors**: throw the `common.web` exceptions. **Lists**: keyset only.
+5. **Hot path**: no configuration reads from the database per event — caches reloaded on `ConfigChangedEvent`.
+6. **Metrics**: Micrometer (`MeterRegistry`), names `alerting.<area>.<what>` (lowercase, dots), tags for low-cardinality
+   values only (channel, severity, outcome — never ids or source names of unbounded sets).
+7. **Code**: English comments and commit messages; Jackson 3 (`tools.jackson.*`); constructor injection; DTO records in the
+   API, never entities; every public class documented.
+8. **Build** without local Java:
    ```bash
-   cd backend
-   docker run --rm --network host -v /var/run/docker.sock:/var/run/docker.sock \
+   cd backend && docker run --rm --network host -v /var/run/docker.sock:/var/run/docker.sock \
      -e TESTCONTAINERS_HOST_OVERRIDE=localhost -v m2cache:/root/.m2 -v "$PWD":/app -w /app \
      maven:3.9-eclipse-temurin-21 mvn -B test
    ```
 
 ---
 
-## 5. Role 1 — Ingest, delivery and infrastructure
+## 6. Role 1 — Ingest, delivery and platform
 
-**Mission:** every event reaches `events.ingest`; every notification is delivered (or visibly retried) without loss;
-everyone else has a running environment.
-
-**Provides:** `OutboxService`, `ConfigChangedPublisher` (Redis), `RecentEvents` (Redis), Kafka topics, listener error
-handling, REST for sources/teams/users/simulator/failed events, docker image with the UI.
-**Consumes:** `ConditionCompiler` (validate team conditions), `TemplateRenderer` (message texts), `AuditService` (optional).
+**Mission:** a fresh clone becomes a running, seeded, documented demo with one command; a third source type works;
+the API matches its contract.
 
 ### Tasks, in order
 
-1. **Kafka topics and listener error handling** (`common.config`)
-   - `NewTopic` beans: `events.ingest` — 6 partitions, `retention.ms` 24 h; `events.ingest.DLT` — 1 partition, 7 days.
-   - A `CommonErrorHandler` bean: `DefaultErrorHandler` + `DeadLetterPublishingRecoverer` → `events.ingest.DLT`,
-     back-off 1 s, 2 s, 5 s; connection errors to Redis/Postgres retried forever every 5 s (not DLT).
-     Spring Boot applies this bean to the default listener factory, so Role 2's `@KafkaListener` picks it up untouched.
-2. **HTTP ingest** (`ingest.api`, `ingest.source`) — `POST /api/ingest/{source}`
-   - Source cache (`SourceRepository`, reload on `ConfigKinds.SOURCES`); unknown or inactive → 404.
-   - Body must be valid JSON → else 400. Build `EventEnvelope.create(SourceType.HTTP, name, body, clock)`.
-   - `kafkaTemplate.send(EVENTS_INGEST, sourceName, json).get(timeout)` → 202 `IngestAccepted`; failure/timeout → 503.
-   - `recentEvents.add(body)`; update `fields:paths` / `card:{path}` (can come in task 6).
-3. **CRUD** `/api/sources`, `/api/teams`, `/api/users` (`delivery.api`), DTOs exactly as in `openapi.yaml`.
-   - Team `condition` validated with `conditionCompiler.compile(condition, strict)` (the stub accepts `==` only — fine).
-   - After save/delete: `configChangedPublisher.publish(ConfigKinds.X)`. Duplicate name/email → 409.
-4. **Redis config reload and recent events**: replace `LocalConfigChangedPublisher` (publish to channel
-   `config.changed` after commit + `RedisMessageListenerContainer` that re-publishes `ConfigChangedEvent` locally) and
-   `InMemoryRecentEvents` (`LPUSH` + `LTRIM 0 999`, `LRANGE`).
-5. **Delivery** (`delivery.outbox`, `delivery.routing`, `delivery.provider.*`, `delivery.ratelimit`, `delivery.simulator`)
-   - `OutboxService.enqueue`: user cache by team (reload on `USERS`/`TEAMS`); for each rule channel × active user pick
-     the channel by `channelPreferences` / `workingHours` / `timezone`; render the text with `TemplateRenderer`; runbook
-     link `/api/runbooks/{id}/file`; `UI` → one `OutboxTask.toTeamFeed` row.
-   - `OutboxWorker` `@Scheduled(fixedDelay = 500)`: in a transaction `lockDueBatch(now, 100)`, send through a
-     `NotificationProvider` per channel, then `markSent` / `scheduleRetry(error, now + 2|5|15|60 s)` / `markFailed`.
-   - Providers: EMAIL via `JavaMailSender` → MailHog (:8025); SMS and CALL simulated; UI rows just become SENT.
-   - Rate limit `rl:{user}:{channel}` 20/min; excess merged into one message.
-   - Simulator: `GET /api/simulator/deliveries` (keyset), `GET /api/simulator/channels`,
-     `POST /api/simulator/channels/{c}/toggle` (a down channel fails → retried), push every attempt to `/topic/simulator`.
-6. **The rest**: external Kafka sources (`ingest.source` — one listener per active `kafka` source, topic from
-   `config.topic`, rebuilt on `SOURCES`), DLT listener → `events` FAILED, `GET /api/events/failed`,
-   `POST /api/events/{id}/replay`, `GET /api/ingest/lag`, `GET /api/fields`, hourly `deleteSentBefore(now − 1 day)`,
-   UI build copied into `static/` by the Dockerfile.
-
-### Verify without the others
-- `curl` an event from `test/resources/events` → visible in `kafka-console-consumer --topic events.ingest`.
-- Insert an alert + `delivery_outbox` rows with SQL → MailHog and the simulator show them; toggle SMS off and on → nothing lost.
+1. **File source** (`ingest.source`) — AGENTS.md §2.1 bonus, `SourceType.FILE` already exists.
+   - A `FileTailSources` component like `ExternalKafkaSources`: listens to `SourceCache.SourcesReloaded`, keeps one tailer
+     per active `file` source, stops tailers of removed/deactivated ones.
+   - Tailer: starts at the **end** of the file (only new lines), polls every 500 ms, survives rotation and truncation
+     (file shrank or was replaced → reopen from the start), reads complete lines only.
+   - Each line → `EventIngestor.ingest(SourceType.FILE, name, payload)`; a JSON line as is, any other line as
+     `{"message": "<line>"}` (contract in `openapi.yaml`). Kafka down (`ServiceUnavailableException`) → retry the
+     **same** line later, never skip it.
+   - `docker-compose.yml`: mount `./infra/logs` to `/data/logs` in the backend container.
+   - Test: temp file, append lines, rotate it — events arrive in `events.ingest` in order, none lost.
+2. **Seed data** (`infra/seed/`): `seed.sh` (bash + curl, no jq) and JSON bodies next to it. Creates over the REST API:
+   - sources `payments-monitoring` (http), `workflow-events` (kafka, topic `workflow.events`), `legacy-gateway` (http),
+     `app-log` (file, `/data/logs/app.log`);
+   - teams **Team Rates**, **Team Pricing**, **Team Infra** with conditions matching the sample events in
+     `test/resources/events`; users with different channel preferences and working hours (emails land in MailHog);
+   - rules: rejected trades grouped by `instrument`, failed workflows with `resolve_condition` status `OK`, high CPU
+     `per_window`; runbooks uploaded from `test/resources/runbooks` (works once Role 3's API is merged; before that the
+     step prints a warning and continues).
+   - Idempotent: a second run changes nothing (409 / existing name → skip).
+3. **Smoke test** (`infra/smoke.sh`): against `docker compose up --build` + seed — send each sample event, append a line to
+   `infra/logs/app.log`, then assert via the API: alerts exist with the right team and severity, an email is in MailHog
+   (`GET :8025/api/v2/messages`), a repeat increases `occurrencesCount`. Exit code ≠ 0 on any failure.
+   Fix what breaks in your packages; report other roles' bugs in chat with the failing step.
+4. **API contract test** (`support`): build the app context, read `/v3/api-docs` (springdoc) and `frontend/openapi.yaml`,
+   compare **paths + methods**: every operation without `x-planned` must be implemented, every `x-planned` one must not be,
+   and nothing may be implemented that is not in the contract. Failure message lists the differences.
+5. **Metrics** in your packages: `alerting.ingest.accepted` / `alerting.ingest.rejected` (tag `reason`),
+   `alerting.delivery.sent` / `.failed` / `.retried` (tag `channel`), gauge `alerting.delivery.pending`.
+6. **Docs**: `README.md` (what it is, quick start, links), `docs/ingest-delivery.md`, `docs/operations.md`
+   (configuration properties, seed, smoke, metrics, troubleshooting). Keep `docker-compose.yml` and the README in sync.
 
 ### Done when
-An event via HTTP **and** via an external Kafka topic arrives in `events.ingest`; with SMS switched off, messages are
-delivered after switching it on, none lost; `docker compose up --build` runs everything including the UI.
+Fresh clone → `docker compose up --build` → `infra/seed/seed.sh` → `infra/smoke.sh` passes; the contract test is green;
+a line appended to the log file becomes an alert.
 
 ---
 
-## 6. Role 2 — Processing and alerts
+## 7. Role 2 — Processing, generator and load
 
-**Mission:** turn the event stream into deduplicated, grouped alerts and push them live to the UI.
-
-**Provides:** alerts and rules REST, `/topic/alerts/{teamId}`, `/topic/unrouted`, the `AlertCreator` transaction.
-**Consumes:** `ConditionCompiler`, `JsonFieldLocator`, `TemplateRenderer`, `RunbookService`, `OutboxService`,
-`AuditService`, `RecentEvents`, `EventRepository` (UNROUTED rows), repositories of your tables.
+**Mission:** prove the pipeline under load (500 identical events per minute → one alert counted 500), give the demo a
+traffic generator, and make processing observable.
 
 ### Tasks, in order
 
-1. **Processor** (`rules.processor`)
-   - `@KafkaListener(topics = KafkaTopics.EVENTS_INGEST, groupId = KafkaTopics.PROCESSOR_GROUP, batch = "true")`
-     taking `List<ConsumerRecord<String, String>>` + `Acknowledgment` (ack mode `manual` is already configured).
-   - Parse each value into `EventEnvelope` with the injected `JsonMapper`. `SET seen:{event_id} NX EX 3600` — seen → skip.
-   - A failing record → `throw new BatchListenerFailedException(msg, e, index)` (Role 1's error handler sends it to DLT).
-   - `ack.acknowledge()` only **after** the transaction committed.
-2. **Caches** (`rules.cache`): teams + active rules (`TeamRepository.findAllByOrderByIdAsc`,
-   `RuleRepository.findAllByActiveTrueOrderByPriorityAscIdAsc`), conditions compiled once with
-   `conditionCompiler.compile(condition, team.isStrict())`; reload on `TEAMS` / `RULES`.
-3. **Matching, fingerprint, dedup** (`rules.dedup`)
-   - Every matching team (multi-match) → its matching rules in priority order (all fire).
-   - Fingerprint `sha256(ruleId + values of group_by_paths [+ window number for per_window])` via `JsonFieldLocator`.
-   - `SET dedup:{fp} pending NX EX window`: new → create; exists → `INCR cnt:{fp}`, `SADD dirty:fp {fp}`.
-4. **`AlertCreator`** (`rules.alert`), one transaction: title via `TemplateRenderer` (default: rule name) →
-   `alertRepository.insertIfNoOpenAlert(Alert.forRule(...))` (empty → it's a repeat) → `findById` →
-   `runbookService.attach` → `outboxService.enqueue` → `auditService.log` → `SET dedup:{fp} {id} XX KEEPTTL`.
-5. **Counter flush** every 1 s: `SPOP dirty:fp 500`, skip `pending`, `GETDEL cnt:{fp}` →
-   `alertRepository.addOccurrences(deltas)`; push changed alerts.
-6. **Push** (`rules.push`): `SimpMessagingTemplate.convertAndSend(WebSocketTopics.alerts(teamId), AlertSummary)` at most
-   once per second per alert (`SET ws:{id} NX PX 1000`).
-7. **Auto-close** by `resolve_condition` (`findOpenByFingerprint` → `resolve` → audit `AUTO_CLOSE` → push).
-   **UNROUTED** (`rules.unrouted`): no team matched → `Alert.unrouted(...)` with fingerprint
-   `sha256("unrouted:" + source + sorted top-level keys)`, `Event.unrouted(...)` via `EventRepository`, `/topic/unrouted`.
-8. **REST** (`rules.api`, `rules.alert`): rules CRUD (validate conditions; publish `RULES`), `POST /api/rules/dry-run`
-   over `recentEvents.latest(1000)`, `GET /api/alerts` (keyset: `findByTeamId…` / `findByTeamIsNull…`),
-   `GET /api/alerts/{id}`, `POST …/ack` and `…/resolve` (audit `ACK`/`RESOLVE`, push), hourly `deleteResolvedBefore(now − 7 days)`.
-
-### Verify without the others
-- Produce envelopes straight into Kafka (`kafka-console-producer` or a test) — no ingest controller needed.
-- Teams and rules via SQL; conditions with `==` work on the stub.
-- Integration test: `@SpringBootTest` + `@Import({PostgresTestConfiguration, KafkaTestConfiguration, RedisTestConfiguration})`;
-  event into the topic → row in `alerts`.
+0. ~~**Fix the flaky end-to-end test**~~ — **done** (branch `role2/fix-config-reload-race`): config reloads arrive
+   asynchronously over Redis, so `AlertPipelineIntegrationTest` now waits until the routing table contains a new team/rule
+   before sending events. Do the same in any new integration test that changes configuration.
+1. **Generator** (`dev`) — `POST /api/dev/generate`, schemas `GenerateRequest` / `GenerateAccepted`.
+   - The controller exists only when `alerting.dev.generator-enabled=true` (`@ConditionalOnProperty`); otherwise 404.
+   - Unknown or inactive `source` (`SourceCache.findActive`) → 400. Answers 202 at once; generation runs in the background
+     at `ratePerSecond` on a dedicated scheduler (cap concurrent generations, e.g. 4; reject more with 409).
+   - Each event goes through `EventIngestor.ingest(source.type(), name, payload)` — the real path. Stop a run on
+     `ServiceUnavailableException` and log it.
+   - Without `template`: cycle through built-in samples copied to `src/main/resources/dev/samples/` (test resources are
+     not on the runtime classpath). With `template`: define and document simple placeholders for variation in string
+     values, e.g. `{{seq}}`, `{{uuid}}`, `{{randInt:1:100}}`, `{{oneOf:EUR|USD}}`; describe them in the `GenerateRequest`
+     schema (your section of `openapi.yaml`).
+   - Remove the `x-planned` marker of the operation in the same PR.
+2. **k6 load test** (`loadtest/`), run with `docker run --network host -i grafana/k6 run - < loadtest/<script>.js`.
+   - `setup()` creates its own source, team and rule over the REST API (unique names), so the script works on any database.
+   - `burst.js`: 500 identical events within one minute → `GET /api/alerts?teamId=` returns exactly one alert with
+     `occurrencesCount = 500` (poll a few seconds); thresholds fail the run otherwise.
+   - `mixed.js`: the sample events from `loadtest/payloads/` at a configurable rate; thresholds on ingest p95 latency and
+     error rate.
+   - Record results (machine, rates, latencies, lag from `GET /api/ingest/lag`) in `docs/load-testing.md`.
+3. **Metrics** in `rules`: `alerting.events.processed` (tag `outcome`: `routed` / `unrouted` / `duplicate`),
+   `alerting.alerts.created` (tag `severity`), `alerting.alerts.repeats`, `alerting.alerts.resolved` (tag `by`: `user` /
+   `rule`), timer `alerting.processing.delay` (now − `ingested_at`).
+4. **Team suggestions** (bonus, `rules.unrouted`) — `GET /api/alerts/{id}/team-suggestions`, schema `TeamSuggestion`.
+   - Score each team from the routing cache by the share of its condition leaves the alert's `sample_payload` satisfies
+     (compile leaves one by one with `ConditionCompiler`), blended with **source history**: count which teams events of a
+     source were routed to in a new Redis hash `src:teams:{source}` (`HINCRBY` in the router; add the key to AGENTS.md §3).
+     The source of an unrouted alert is in its `events` rows (`EventRepository`, by `alert_id`).
+   - At most 5, best first, `reason` human-readable; empty list for alerts that have a team; 404 for unknown alerts.
+   - Remove the `x-planned` marker in the same PR.
+5. **Hardening** of `rules`: inject `Clock` instead of `Instant.now()` (`AlertService`, `AlertCleanup`,
+   `OccurrenceFlusher`); extend `AlertPipelineIntegrationTest` with audit assertions (`ALERT_CREATED`, `AUTO_CLOSE`, `ACK`,
+   `RESOLVE`) and, after Role 3's merge, a runbook-attached assertion; optionally auto-close `per_window` alerts of earlier
+   windows.
+6. **Docs**: `docs/processing.md` (from `rules/package-info.java`, for humans), `docs/load-testing.md`.
 
 ### Done when
-500 identical events → one alert with `occurrencesCount = 500`; Team Rates and Team Pricing rules work; editing a
-rule takes effect without restart; the UI feed updates live.
+The generator drives the demo from the UI; `burst.js` passes on the compose stack; metrics are visible in
+`/actuator/prometheus`; suggestions rank the right team first for `alien-schema.json` once a matching team exists.
 
 ---
 
-## 7. Role 3 — Condition engine, runbooks, audit, tooling
+## 8. Role 3 — Runbooks and conditions
 
-**Mission:** the engine that decides what matters (merge it **first** — everybody's stubs get replaced by it),
-runbooks attached to alerts, the audit trail, and the tools to test and present the system.
-
-**Provides:** `ConditionCompiler`, `JsonFieldLocator`, `TemplateRenderer`, `RunbookService`, `AuditService`,
-runbooks REST, audit REST, generator, load test, README.
-**Consumes:** `ConfigChangedPublisher`, repositories of your tables, `AlertRepository` (read).
+**Mission:** AGENTS.md §2.6 — a judge uploads a runbook in any format with a condition, and the next matching alert links
+to it in the UI card, the email and the audit trail.
 
 ### Tasks, in order
 
-1. **Condition engine** (`common.condition`, `common.json`) — target: merged within the first ~3 hours.
-   - Fill `DefaultConditionCompiler`: `and` / `or` / leaf; all operators of AGENTS.md §5; regex/glob compiled once to
-     `Pattern`; missing field → every comparison false (including `!=`, `not_in`), `exists` false.
-   - Flexible mode: exact path, else key with the same last segment anywhere (case-insensitive); numeric strings compare
-     as numbers. Strict mode: exact path and exact types. Fill `ExactPathFieldLocator` accordingly (rename if you like).
-   - Validation messages name the node: `Unknown operator 'equals' at $.and[1]`.
-   - Pure unit tests (no Spring, no DB) over `test/resources/events/*.json`; keep `DefaultConditionCompilerTest` green.
-2. **Audit** (`runbooks.audit`, `runbooks.api`): `DefaultAuditService` inserts `AuditLog` (joins the caller's
-   transaction); `GET /api/alerts/{id}/audit` (404 for an unknown alert).
-3. **Runbooks REST** (`runbooks.api`): multipart upload (`file`, `teamId?`, `condition?` JSON string, 10 MB), list via
-   `RunbookRepository` summaries (never `content`), `GET/PUT/DELETE /api/runbooks/{id}`,
-   `GET /api/runbooks/{id}/file` with `MediaTypeFactory.getMediaType(fileName)` and `Content-Disposition: inline`.
-   Validate conditions; publish `RUNBOOKS`.
-4. **Selection** (`runbooks.cache`, `runbooks.matching`): cache of `RunbookSummary` + compiled conditions (reload on
-   `RUNBOOKS` / `TEAMS`); `DefaultRunbookService.attach` in the order of AGENTS.md §6 step 8, then
-   `alert.attachRunbook(...)` and audit `RUNBOOK_ATTACHED`. No queries per event.
-5. **Generator** (`dev`): `POST /api/dev/generate` sends events through the real HTTP ingest (`RestClient` to
-   `/api/ingest/{source}`) at the requested rate — exercises the whole pipeline.
-6. **Load test** (`loadtest/`): k6 script — 500 identical events per minute + a mix of the sample events; README section
-   on how to run it and what to expect (one alert, counter 500).
-7. **README.md**: run locally, add a source / team / rule / runbook, the demo script with the "foreign" schema.
-
-### Verify without the others
-- Engine: unit tests only. Runbooks: `curl` upload/download. `attach`: unit test with an `Alert` built in the test.
+0. ~~**Finish `role3/runbooks-api`**~~ — **done**: `main` merged in, `RunbookCrudServiceTest` moved off the removed
+   `LocalConfigChangedPublisher`, new `RunbookUploadLimitTest` (over 10 MB → 413 problem+json on a real server; Tomcat
+   closes the connection after refusing a body, so clients get the status but maybe not the full body — the UI should
+   check the size before uploading). Still optional: strip Windows paths (`C:\x\file.pdf`) from file names.
+1. **Runbook cache** (`runbooks.cache`): `RunbookRepository.findAllSummaries()` (never `content`) + teams' strict flags
+   (`TeamRepository`); compile each condition once (team runbook → the team's `strict`, global → flexible). Load before Kafka
+   consumers start (`SmartInitializingSingleton`, like `RoutingCache`); reload on `RUNBOOKS` and `TEAMS`. A stored condition
+   that no longer compiles → skip that runbook and log, never fail the reload.
+2. **Selection** — fill `DefaultRunbookService.attach(alert, event)` (AGENTS.md §6 step 8):
+   1. `alert.getRule().getOverrideRunbook()` if set; 2. the alert team's runbooks whose condition matches;
+   3. global runbooks whose condition matches; ties → lower id; runbooks with `condition = null` match only via override.
+   Then `alert.attachRunbook(runbookRepository.getReferenceById(id))` and audit `RUNBOOK_ATTACHED`
+   (actor `AuditLog.SYSTEM_ACTOR`, details `{runbookId, fileName, reason: "override" | "team" | "global"}`).
+   Runs inside Role 2's creation transaction — cache only, no queries except the reference; never throw for "no match".
+3. ~~**REST**~~ — done on `role3/runbooks-api` (task 0). For reference, what it covers (`runbooks.api`), schemas `Runbook`, `RunbookUpload`, `RunbookUpdate`:
+   - `GET /api/runbooks?teamId=` — that team's plus global runbooks (summaries, never bytes); without `teamId` all.
+   - `POST` multipart: `file` required and non-empty; file name from `getOriginalFilename()` stripped of any path, ≤ 255
+     chars; `teamId` must exist (400); `condition` is a JSON string → parse (400) and validate with `ConditionCompiler`
+     (400 with the engine's detail). 201 with `fileUrl = /api/runbooks/{id}/file`. Over 10 MB → 413 problem+json.
+   - `GET /{id}`, `PUT /{id}` (team, condition, optional new file → `replaceFile`), `DELETE /{id}` → 204 (rules and alerts
+     lose the link by `ON DELETE SET NULL`).
+   - `GET /{id}/file`: `RunbookRepository.findFileById`; `Content-Type` from
+     `MediaTypeFactory.getMediaType(fileName)` (fallback `application/octet-stream`); `Content-Disposition: inline` with the
+     UTF-8 file name (`ContentDisposition` builder).
+   - Publish `ConfigKinds.RUNBOOKS` after every change.
+4. **Condition engine follow-ups** (from the phase-1 review):
+   - reject unknown keys in leaves and in `and` / `or` nodes — a typo like `"vaule"` must be a 400, not a silent default;
+   - document `exists: false` and "JSON null counts as absent" in `docs/conditions.md`, AGENTS.md §5 and the `LeafCondition`
+     description in `openapi.yaml`;
+   - decide AGENTS.md §11 q.2 (`not` node); if added, update the `Condition` schema and tell Role 4;
+   - `PlaceholderTemplateRenderer`: remove the step-0 stub note (it is final), add tests for flexible placeholders;
+   - move `AuditEntry` out of `runbooks.api` into `runbooks.audit` (the service should not depend on the web layer);
+   - optional rename `ExactPathFieldLocator` → `DefaultJsonFieldLocator` (it does the flexible search too). Two tests of
+     Role 2 construct it (`RoutingCacheTest`, `FingerprintCalculatorTest`): announce in chat and change those two lines in
+     the same PR — the one agreed exception to the ownership rule.
+5. **Docs**: `docs/conditions.md` (every operator with an example on the sample events), `docs/runbooks.md`.
 
 ### Done when
-All operators and both modes are covered by tests; a judge uploads a runbook in any format with a condition and the
-next matching alert links to the file.
+Upload `trade-rejection.md` with its condition → send `rates-trade-rejected.json` → the alert card shows the runbook, the
+email contains the download link, the audit shows `RUNBOOK_ATTACHED`, and the file downloads with `Content-Type: text/markdown`.
 
 ---
 
-## 8. Role 4 — Frontend and demo
+## 9. Role 4 — Frontend (separate) — what changes for you
 
-**Mission:** an operator can run the whole demo with the mouse — no curl, no Postman.
-
-**Provides:** the React app in `frontend/`, the demo script and slides in `demo/`.
-**Consumes:** `frontend/openapi.yaml` only (REST + WebSocket). No polling — live data comes from STOMP.
-
-### Setup (first hour)
-- Vite + React + TypeScript in `frontend/` (the folders under `src/` already exist).
-- Types from the contract: `npx openapi-typescript openapi.yaml -o src/api/schema.ts`; regenerate when the file changes.
-- Mocks: MSW handlers for every path in `openapi.yaml`, plus a fake STOMP source that emits an `AlertSummary` every
-  2 s. `VITE_USE_MOCKS=true|false` switches between mocks and the backend — one variable, nothing else.
-- Dev proxy in `vite.config.ts`: `/api` and `/ws` (with `ws: true`) → `http://localhost:8080`.
-- STOMP client `@stomp/stompjs` over plain WebSocket at `/ws` (no SockJS).
-- `npm run build` output is copied into `backend/src/main/resources/static` by Role 1's Docker build — keep the build
-  self-contained (`base: '/'`, no environment-specific URLs).
-
-### Pages, in order
-1. **Feed** (`pages/feed`): team picker, alerts newest first, severity colour, status, live counter, ack/resolve
-   buttons; infinite scroll with `nextCursor`; updates from `/topic/alerts/{teamId}`.
-2. **Alert card** (`pages/alert`): `samplePayload` as a JSON tree, runbook link (`fileUrl`), audit history.
-3. **Unrouted** (`pages/unrouted`): `/api/alerts?unrouted=true` + `/topic/unrouted`; button "create rule from this
-   event" → opens the rule editor prefilled with paths/values from the event.
-4. **Condition builder** (shared component): and/or tree, field autocompletion from `/api/fields`, operator list from
-   the `Operator` enum, live preview via `POST /api/rules/dry-run`; shows the 400 `detail` next to the bad node.
-5. **Rules** (`pages/rules`), **Teams & users** (`pages/recipients` — preferences and working hours editors),
-   **Runbooks** (`pages/runbooks` — upload with condition), **Failed events** (`pages/failed` — replay),
-   **Simulator** (`pages/simulator` — channel switches, live deliveries from `/topic/simulator`).
-6. **Demo** (`demo/`): step-by-step script — new source with a foreign schema, team + rule built in the UI, runbook upload,
-   burst of events → one alert with a counter, SMS outage and recovery — plus slides.
-
-### Verify without the others
-Everything runs on mocks; switching `VITE_USE_MOCKS=false` against a running backend is the integration test.
-
-### Done when
-The demo script runs end to end with the mouse only.
+- **New endpoint** `GET /api/alerts/{id}/team-suggestions` for the unrouted page (`TeamSuggestion`).
+- **File sources**: the source form needs a `path` field for `type = file` (see `SourceInput.config`).
+- **`x-planned: true`** marks endpoints that are not live yet — keep their mocks; the marker disappears when the backend
+  ships them. The **runbooks API** is live as soon as `role3/runbooks-api` is merged. Check the file size (≤ 10 MB) in the
+  browser before uploading: for a too-large upload the server answers 413 but closes the connection, so the browser may
+  only see a network error.
+- The generator (`POST /api/dev/generate`) can back a "send test events" button on the simulator page.
 
 ---
 
-## 9. Integration checkpoints
+## 10. Integration checkpoints
 
-| When | What must work on `main` |
+| When | On `main` |
 |---|---|
-| ~3 h | Real condition engine (Role 3) merged; HTTP ingest → `events.ingest` (Role 1); processor creates alerts from Kafka (Role 2); UI feed on mocks (Role 4) |
-| ~6 h | Event via `curl` → alert → UI row in `delivery_outbox` → live in the UI feed against the real backend |
-| ~9 h | Emails in MailHog, simulator retries; runbook attached and downloadable from the alert card; rules editable in the UI without restart |
-| final | Full demo script by all four, twice in a row |
+| now | merge `role3/runbooks-api`, `role2/fix-config-reload-race`, `phase2/roles` (any order — verified together: 104 tests green) |
+| ~3 h | runbook cache + selection (Role 3); generator (Role 2); file source (Role 1) |
+| ~6 h | seed + smoke pass on the compose stack; `burst.js` passes; contract test green with no `x-planned` left except bonuses |
+| final | demo dry run: fresh clone → compose → seed → UI scenario, twice in a row |
 
-## 10. Open questions (decide in chat, then update AGENTS.md)
+## 11. Open decisions
 
-1. `teams.condition = null` — "no events" (current) or "all events, rules filter"? Affects Role 2's matching and the
-   UI's team editor.
-2. A `not` node in conditions — Role 3 decides; it would touch `openapi.yaml` (`Condition`) and the builder (Role 4).
-3. A user in several teams — not supported (one `users.team_id`); changing it needs a migration by Role 1.
+| Question | Decides | Default if nobody decides |
+|---|---|---|
+| `not` node in conditions (AGENTS.md §11 q.2) | Role 3 | not added |
+| `teams.condition = null` (AGENTS.md §11 q.1) | team | stays "no events" (implemented in routing and dry-run) |
+| Generator placeholders syntax | Role 2 | as proposed in §7 |
+| File source starts at end or beginning of the file | Role 1 | end (only new lines) |
