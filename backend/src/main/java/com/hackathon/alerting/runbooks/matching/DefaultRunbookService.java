@@ -14,6 +14,7 @@ import com.hackathon.alerting.runbooks.repository.RunbookRepository;
 import com.hackathon.alerting.runbooks.repository.RunbookSummary;
 import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
@@ -50,7 +51,7 @@ public class DefaultRunbookService implements RunbookService {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.MANDATORY)
     public void attach(Alert alert, JsonNode event) {
         if (alert == null) {
             return;

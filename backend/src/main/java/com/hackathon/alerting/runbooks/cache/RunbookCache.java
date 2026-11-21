@@ -69,14 +69,14 @@ public class RunbookCache implements SmartInitializingSingleton {
 
     /** Rebuilds the catalog from Postgres and swaps the volatile reference atomically. */
     public synchronized void reload() {
+        // Load runbooks before teams so every runbook's committed team FK is visible in strictByTeamId.
+        List<RunbookSummary> summaries = runbooks.findAllSummaries();
         Map<Long, Boolean> strictByTeamId = new HashMap<>();
         for (Team team : teams.findAllByOrderByIdAsc()) {
             if (team.getId() != null) {
                 strictByTeamId.put(team.getId(), team.isStrict());
             }
         }
-
-        List<RunbookSummary> summaries = runbooks.findAllSummaries();
         Map<Long, CompiledRunbook> byId = new LinkedHashMap<>(summaries.size());
         Map<Long, List<CompiledRunbook>> byTeamId = new LinkedHashMap<>();
         List<CompiledRunbook> globalRunbooks = new ArrayList<>();
