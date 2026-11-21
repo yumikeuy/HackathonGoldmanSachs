@@ -213,6 +213,34 @@ class DefaultConditionCompilerTest {
 
         assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"a\",\"op\":\"==\",\"value\":null}"), false))
                 .isInstanceOf(InvalidConditionException.class);
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"and\":[]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("must not be empty");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"or\":[]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("must not be empty");
+
+        for (String badPath : new String[]{".notional", "trade.", "trade..notional", " trade.id "}) {
+            assertThatThrownBy(() -> compiler.compile(
+                    json("{\"path\":\"" + badPath + "\",\"op\":\"==\",\"value\":1}"), false))
+                    .as("bad path: '%s'", badPath)
+                    .isInstanceOf(InvalidConditionException.class)
+                    .hasMessageContaining("Invalid path");
+        }
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"value\",\"op\":\">\",\"value\":\"90\"}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("numeric 'value'");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"metric\",\"op\":\"in\",\"value\":[]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("non-empty array");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"metric\",\"op\":\"not_in\",\"value\":[\"cpu\",null]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("null elements");
     }
 
     private static JsonNode loadFixture(String resourcePath) throws IOException {
