@@ -18,7 +18,8 @@ import java.time.Duration;
  * with login enforced the link is signed and works for {@link #RUNBOOK_LINK_TTL} without a token
  * ({@link RunbookLinkSigner}).
  *
- * <p>Payload fields: {@code alertId}, {@code severity}, {@code title}, {@code text}, {@code runbookUrl} (if any);
+ * <p>Payload fields: {@code alertId}, {@code severity}, {@code title}, {@code text}, {@code firstSeenAt} (for the
+ * delivery latency metric), {@code runbookUrl} (if any);
  * EMAIL adds {@code to} and {@code subject}, SMS and CALL add {@code to} (the phone number).
  */
 @Component
@@ -78,7 +79,8 @@ public class MessageComposer {
                 .put("alertId", alert.getId())
                 .put("severity", alert.getSeverity().name())
                 .put("title", alert.getTitle())
-                .put("text", "[" + alert.getSeverity() + "] " + alert.getTitle());
+                .put("text", "[" + alert.getSeverity() + "] " + alert.getTitle())
+                .put("firstSeenAt", alert.getFirstSeenAt().toString());
         String runbookUrl = runbookUrl(alert);
         if (runbookUrl != null) {
             payload.put("runbookUrl", runbookUrl);

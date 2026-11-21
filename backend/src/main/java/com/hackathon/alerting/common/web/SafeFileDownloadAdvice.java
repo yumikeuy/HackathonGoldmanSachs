@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
  * the operator's browser (stored XSS), while still accepting files of <b>any</b> format (AGENTS.md §2.6).
  *
  * <ul>
- *   <li>Only passive types are shown inline: PDF, plain text, Markdown, images except SVG. Everything else — HTML, SVG,
+ *   <li>Only passive types are shown inline: PDF, plain text, Markdown, CSV, YAML, images except SVG. Everything else — HTML, SVG,
  *       XML, JavaScript, unknown — is sent as {@code Content-Disposition: attachment} (downloaded, never rendered
  *       on our origin).</li>
  *   <li>A file that claims a passive text type but whose content starts like markup ({@code <html}, {@code <script},
@@ -40,7 +40,12 @@ public class SafeFileDownloadAdvice implements ResponseBodyAdvice<Object> {
     /** Types that browsers display without running anything. */
     static final Set<String> INLINE_SAFE = Set.of(
             "application/pdf", "text/plain", "text/markdown", "text/csv",
+            "application/yaml", "application/x-yaml", "text/yaml", "text/x-yaml",
             "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp");
+
+    /** Inline-safe types that are text: their content is checked for disguised markup. */
+    private static final Set<String> TEXTUAL = Set.of(
+            "text/plain", "text/markdown", "text/csv", "application/yaml", "application/x-yaml", "text/yaml", "text/x-yaml");
 
     private static final Pattern MARKUP_START = Pattern.compile(
             "^\\s*(<!doctype\\s+html|<html|<script|<svg|<\\?xml|<iframe|<body|<head|<object|<embed)", Pattern.CASE_INSENSITIVE);
@@ -79,7 +84,7 @@ public class SafeFileDownloadAdvice implements ResponseBodyAdvice<Object> {
         if (!INLINE_SAFE.contains(base)) {
             return false;
         }
-        return !base.startsWith("text/") || !looksLikeMarkup(content);
+        return !TEXTUAL.contains(base) || !looksLikeMarkup(content);
     }
 
     static boolean looksLikeMarkup(byte[] content) {

@@ -11,6 +11,7 @@ import com.hackathon.alerting.delivery.simulator.Delivery;
 import com.hackathon.alerting.delivery.repository.OutboxTaskRepository;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -25,6 +26,7 @@ import tools.jackson.databind.node.ObjectNode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -45,7 +47,9 @@ import java.util.Map;
  * </ul>
  * Every attempt is pushed to {@code /topic/simulator} after the commit.
  *
- * <p>Metrics (tag {@code channel}): {@value #SENT}, {@value #RETRIED}, {@value #FAILED}; gauge {@value #PENDING}.
+ * <p>Metrics (tag {@code channel}): {@value #SENT}, {@value #RETRIED}, {@value #FAILED}; gauge {@value #PENDING};
+ * timer {@value #LATENCY} — end to end, from the alert's first event ({@code firstSeenAt}, the server's ingest time)
+ * to the moment the provider accepted the message, with p50 / p95 / p99.
  */
 @Component
 public class OutboxWorker {
@@ -54,6 +58,7 @@ public class OutboxWorker {
     public static final String RETRIED = "alerting.delivery.retried";
     public static final String FAILED = "alerting.delivery.failed";
     public static final String PENDING = "alerting.delivery.pending";
+    public static final String LATENCY = "alerting.delivery.latency";
 
     static final int BATCH_SIZE = 100;
     static final List<Duration> RETRY_DELAYS = List.of(
@@ -213,7 +218,30 @@ public class OutboxWorker {
 
     private void markSent(OutboxTask task, Instant now) {
         task.markSent(now);
-        metrics.counter(SENT, "channel", task.getChannel().name()).increment();
+        String channel = task.getChannel().name();
+        metrics.counter(SENT, "channel", channel).increment();
+        Instant firstSeen = firstSeenAt(task.getPayload());
+        if (firstSeen != null && !now.isBefore(firstSeen)) {
+            Timer.builder(LATENCY)
+                    .description("From the alert's first event to the notification being sent")
+                    .tag("channel", channel)
+                    .publishPercentiles(0.5, 0.95, 0.99)
+                    .publishPercentileHistogram()
+                    .register(metrics)
+                    .record(Duration.between(firstSeen, clock.instant()));
+        }
+    }
+
+    private static Instant firstSeenAt(JsonNode payload) {
+        JsonNode value = payload == null ? null : payload.get("firstSeenAt");
+        if (value == null || !value.isString()) {
+            return null;
+        }
+        try {
+            return Instant.parse(value.asString());
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     private void fail(OutboxTask task, String error, Instant now) {

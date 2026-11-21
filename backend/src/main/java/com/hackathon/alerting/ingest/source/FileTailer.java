@@ -11,6 +11,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Follows one file like {@code tail -F} and hands every complete new line to a {@link LineSink}. Not thread-safe:
@@ -44,20 +45,48 @@ public class FileTailer implements AutoCloseable {
     private long position;
 
     /**
+     * Where a tailer stopped: the identity of the file and the offset after the last delivered line. Lets another
+     * tailer (e.g. on another instance after a failover) continue exactly there.
+     *
+     * @param fileKey identity of the file (device + inode) as text
+     * @param position byte offset of the next undelivered line
+     */
+    public record Checkpoint(String fileKey, long position) {
+    }
+
+    /**
      * @param path        file to follow
      * @param sink        receives complete lines
      * @param startAtEnd  {@code true}: skip what an existing file already contains
      */
     public FileTailer(Path path, LineSink sink, boolean startAtEnd) {
+        this(path, sink, startAtEnd, null);
+    }
+
+    /**
+     * @param resume where a previous tailer of the same file stopped; used if it is still the same file and not shorter,
+     *               otherwise {@code startAtEnd} decides
+     */
+    public FileTailer(Path path, LineSink sink, boolean startAtEnd, Checkpoint resume) {
         this.path = Objects.requireNonNull(path, "path");
         this.sink = Objects.requireNonNull(sink, "sink");
-        if (startAtEnd && open()) {
+        if (open()) {
             try {
-                position = channel.size();
+                long size = channel.size();
+                if (resume != null && String.valueOf(fileKey).equals(resume.fileKey()) && resume.position() <= size) {
+                    position = resume.position();
+                } else if (startAtEnd) {
+                    position = size;
+                }
             } catch (IOException e) {
                 position = 0;
             }
         }
+    }
+
+    /** Current position, or empty while the file does not exist. */
+    public Optional<Checkpoint> checkpoint() {
+        return channel == null ? Optional.empty() : Optional.of(new Checkpoint(String.valueOf(fileKey), position));
     }
 
     /**

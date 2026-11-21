@@ -88,8 +88,10 @@ Edit only your part; announce changes in chat **before** merging (Role 4 regener
    API, never entities; every public class documented.
 8. **Build** without local Java:
    ```bash
-   cd backend && docker run --rm --network host -v /var/run/docker.sock:/var/run/docker.sock \
-     -e TESTCONTAINERS_HOST_OVERRIDE=localhost -v m2cache:/root/.m2 -v "$PWD":/app -w /app \
+   # from the repository root (ApiContractTest reads ../frontend/openapi.yaml); Linux. Docker Desktop: drop
+   # --network host and use TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal (docs/operations.md)
+   docker run --rm --network host -v /var/run/docker.sock:/var/run/docker.sock \
+     -e TESTCONTAINERS_HOST_OVERRIDE=localhost -v m2cache:/root/.m2 -v "$PWD":/repo -w /repo/backend \
      maven:3.9-eclipse-temurin-21 mvn -B test
    ```
 
