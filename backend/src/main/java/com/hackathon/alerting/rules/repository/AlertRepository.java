@@ -5,6 +5,7 @@ import com.hackathon.alerting.rules.model.AlertStatus;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.domain.Window;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -12,6 +13,7 @@ import org.springframework.data.jpa.repository.Query;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -37,18 +39,36 @@ public interface AlertRepository extends JpaRepository<Alert, Long>, AlertJdbcOp
     /**
      * Keyset page of a team's feed, most recently seen first ({@code GET /api/alerts}).
      * The sort matches index {@code idx_alerts_feed (team_id, last_seen_at DESC, id)}.
+     * The rule is fetched in the same query (feed rows show its name).
      *
      * @param position {@code ScrollPosition.keyset()} for the first page, then {@code window.positionAt(last)}
      * @param limit    page size (AGENTS.md: 50)
      */
+    @EntityGraph(attributePaths = "rule")
     Window<Alert> findByTeamIdOrderByLastSeenAtDescIdAsc(Long teamId, ScrollPosition position, Limit limit);
 
     /** Same as {@link #findByTeamIdOrderByLastSeenAtDescIdAsc}, restricted to the given statuses. */
+    @EntityGraph(attributePaths = "rule")
     Window<Alert> findByTeamIdAndStatusInOrderByLastSeenAtDescIdAsc(Long teamId, Collection<AlertStatus> statuses,
                                                                      ScrollPosition position, Limit limit);
 
     /** Keyset page of UNROUTED alerts (no team), most recently seen first. */
     Window<Alert> findByTeamIsNullOrderByLastSeenAtDescIdAsc(ScrollPosition position, Limit limit);
+
+    /** Same as {@link #findByTeamIsNullOrderByLastSeenAtDescIdAsc}, restricted to the given statuses. */
+    Window<Alert> findByTeamIsNullAndStatusInOrderByLastSeenAtDescIdAsc(Collection<AlertStatus> statuses,
+                                                                        ScrollPosition position, Limit limit);
+
+    /** Alerts with their rule fetched, for pushing counter updates of many alerts at once. */
+    @EntityGraph(attributePaths = "rule")
+    List<Alert> findWithRuleByIdIn(Collection<Long> ids);
+
+    /** One alert with rule and runbook fetched, for the alert card. */
+    @EntityGraph(attributePaths = {"rule", "runbook"})
+    Optional<Alert> findDetailedById(Long id);
+
+    /** Whether any alert (in any status) references the rule — such a rule cannot be deleted. */
+    boolean existsByRuleId(Long ruleId);
 
     /**
      * Hourly cleanup: deletes RESOLVED alerts resolved before {@code cutoff} (AGENTS.md: older than 7 days).
