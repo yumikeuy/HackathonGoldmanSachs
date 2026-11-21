@@ -7,10 +7,12 @@ import com.hackathon.alerting.common.web.InvalidRequestException;
 import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.delivery.model.Team;
 import com.hackathon.alerting.delivery.repository.TeamRepository;
+import com.hackathon.alerting.runbooks.matching.RunbookSelectionChanged;
 import com.hackathon.alerting.runbooks.model.Runbook;
 import com.hackathon.alerting.runbooks.repository.RunbookFile;
 import com.hackathon.alerting.runbooks.repository.RunbookRepository;
 import com.hackathon.alerting.runbooks.repository.RunbookSummary;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -29,7 +31,8 @@ import java.util.stream.Stream;
  *
  * <p>Listing and metadata endpoints use {@link RunbookSummary} projections so {@code runbooks.content}
  * is never loaded except during {@link #downloadFile}. Mutations validate any {@code condition} tree
- * with {@link ConditionCompiler} and announce {@link ConfigKinds#RUNBOOKS} after commit.
+ * with {@link ConditionCompiler} and announce {@link ConfigKinds#RUNBOOKS} after commit. Every mutation also publishes
+ * {@link RunbookSelectionChanged} inside its transaction, so open alerts get re-selected runbooks ({@code RunbookResync}).
  */
 @Service
 public class RunbookCrudService {
@@ -41,14 +44,16 @@ public class RunbookCrudService {
     private final ConditionCompiler compiler;
     private final ConfigChangedPublisher configChanged;
     private final JsonMapper json;
+    private final ApplicationEventPublisher events;
 
     public RunbookCrudService(RunbookRepository runbooks, TeamRepository teams, ConditionCompiler compiler,
-                              ConfigChangedPublisher configChanged, JsonMapper json) {
+                              ConfigChangedPublisher configChanged, JsonMapper json, ApplicationEventPublisher events) {
         this.runbooks = runbooks;
         this.teams = teams;
         this.compiler = compiler;
         this.configChanged = configChanged;
         this.json = json;
+        this.events = events;
     }
 
     /**
@@ -89,6 +94,7 @@ public class RunbookCrudService {
         Runbook runbook = new Runbook(team, fileName, content);
         runbook.setCondition(condition);
         Runbook saved = runbooks.save(runbook);
+        events.publishEvent(RunbookSelectionChanged.created(saved.getId()));
         configChanged.publish(ConfigKinds.RUNBOOKS);
         return RunbookDto.from(saved);
     }
@@ -110,6 +116,7 @@ public class RunbookCrudService {
         }
 
         Runbook saved = runbooks.save(runbook);
+        events.publishEvent(RunbookSelectionChanged.updated(saved.getId()));
         configChanged.publish(ConfigKinds.RUNBOOKS);
         return RunbookDto.from(saved);
     }
@@ -119,6 +126,8 @@ public class RunbookCrudService {
         if (!runbooks.existsById(id)) {
             throw new NotFoundException("Runbook", id);
         }
+        // before deleting: open alerts that use it are re-pointed (or lose it) visibly, with an audit entry each
+        events.publishEvent(RunbookSelectionChanged.deleting(id));
         runbooks.deleteById(id);
         configChanged.publish(ConfigKinds.RUNBOOKS);
     }

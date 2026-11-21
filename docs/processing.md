@@ -52,7 +52,8 @@ per rule.
 Resolved by a user (`POST /api/alerts/{id}/resolve`) or by a rule's `resolve_condition` (audit `AUTO_CLOSE`).
 After resolution the next matching event opens a new alert. Resolved alerts are deleted after 7 days.
 
-Audit actions written by processing: `ALERT_CREATED`, `ACK`, `RESOLVE`, `AUTO_CLOSE` (Role 3 adds `RUNBOOK_ATTACHED`).
+Audit actions written by processing: `ALERT_CREATED`, `ACK`, `RESOLVE`, `AUTO_CLOSE` (Role 3 adds `RUNBOOK_ATTACHED`,
+and `RUNBOOK_DETACHED` when an open alert's runbook is re-selected after runbooks change — see [runbooks.md](runbooks.md)).
 
 ## Unrouted events
 

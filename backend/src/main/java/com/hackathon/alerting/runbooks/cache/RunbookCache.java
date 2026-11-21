@@ -69,6 +69,19 @@ public class RunbookCache implements SmartInitializingSingleton {
 
     /** Rebuilds the catalog from Postgres and swaps the volatile reference atomically. */
     public synchronized void reload() {
+        RunbookCatalog loaded = load();
+        catalog = loaded;
+        int teamMatchableCount = loaded.byTeamId().values().stream().mapToInt(List::size).sum();
+        log.info("Runbook cache loaded: {} total ({} team-matchable, {} global-matchable)",
+                loaded.size(), teamMatchableCount, loaded.globalRunbooks().size());
+    }
+
+    /**
+     * Builds a fresh catalog from Postgres without touching the cached one. Called inside a transaction it sees that
+     * transaction's own changes — {@code RunbookResync} uses this to re-select runbooks right after a runbook changed,
+     * before the cache reload ({@code config.changed}) reaches this instance.
+     */
+    public RunbookCatalog load() {
         // Load runbooks before teams so every runbook's committed team FK is visible in strictByTeamId.
         List<RunbookSummary> summaries = runbooks.findAllSummaries();
         Map<Long, Boolean> strictByTeamId = new HashMap<>();
@@ -110,10 +123,7 @@ public class RunbookCache implements SmartInitializingSingleton {
             }
         }
 
-        catalog = new RunbookCatalog(byId, byTeamId, globalRunbooks);
-        int teamMatchableCount = byTeamId.values().stream().mapToInt(List::size).sum();
-        log.info("Runbook cache loaded: {} total ({} team-matchable, {} global-matchable)",
-                catalog.size(), teamMatchableCount, globalRunbooks.size());
+        return new RunbookCatalog(byId, byTeamId, globalRunbooks);
     }
 
     private static boolean isAbsent(JsonNode condition) {

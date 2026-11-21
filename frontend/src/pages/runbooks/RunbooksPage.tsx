@@ -135,7 +135,7 @@ export function RunbooksPage() {
         open={!!deleting}
         title="Delete this runbook?"
         body={<>
-          <b className="text-gray-900 font-medium">{deleting?.fileName}</b> will no longer be attached to new alerts; alerts that link to it lose the link.
+          <b className="text-gray-900 font-medium">{deleting?.fileName}</b> will no longer be attached to new alerts; open alerts that use it get the next matching runbook, or none. Resolved alerts lose the link.
           {deleting && usedBy(deleting.id).length > 0 && ` ${usedBy(deleting.id).length} rule(s) that always attach it will pick automatically instead.`}
         </>}
         label="Delete runbook"

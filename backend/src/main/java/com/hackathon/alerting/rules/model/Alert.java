@@ -171,9 +171,14 @@ public class Alert {
         return rule == null;
     }
 
-    /** Attach the runbook chosen by {@code RunbookService.attach}. */
+    /** Attach the runbook chosen by {@code RunbookService.attach} (or re-chosen by {@code RunbookResync}). */
     public void attachRunbook(Runbook runbook) {
         this.runbook = Objects.requireNonNull(runbook, "runbook");
+    }
+
+    /** Remove the runbook link: no runbook applies any more ({@code RunbookResync}). */
+    public void detachRunbook() {
+        this.runbook = null;
     }
 
     public Long getId() {

@@ -1,7 +1,7 @@
 /** Alert card (right drawer): detail, runbook, payload, notifications and audit trail. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  BellRing, Check, CircleCheck, CircleCheckBig, Copy, Download, Eye, Loader, Paperclip, Plus, Workflow, X, type LucideIcon,
+  BellRing, Check, CircleCheck, CircleCheckBig, Copy, Download, Eye, Loader, Paperclip, Plus, Unlink, Workflow, X, type LucideIcon,
 } from 'lucide-react';
 import * as api from '../../api/endpoints';
 import { errorText } from '../../api/client';
@@ -20,6 +20,7 @@ import { usePermissions } from '../../auth/permissions';
 const AUDIT: Record<string, [LucideIcon, string]> = {
   ALERT_CREATED: [BellRing, 'bg-red-50 text-red-600'],
   RUNBOOK_ATTACHED: [Paperclip, 'bg-gray-100 text-gray-600'],
+  RUNBOOK_DETACHED: [Unlink, 'bg-gray-100 text-gray-500'],
   ACK: [Eye, 'bg-amber-50 text-amber-600'],
   RESOLVE: [CircleCheck, 'bg-emerald-50 text-emerald-600'],
   AUTO_CLOSE: [CircleCheckBig, 'bg-emerald-50 text-emerald-600'],
@@ -102,8 +103,11 @@ export function AlertDrawer() {
       case 'ALERT_CREATED': return unrouted ? 'Alert opened: the event matched no team' : `Alert opened by ${rule ? `rule “${rule.name}”` : 'a rule'}`;
       case 'RUNBOOK_ATTACHED': {
         const why = d.reason === 'override' ? 'by the rule' : d.reason === 'team' ? "because the team's runbook condition matched" : d.reason === 'global' ? 'because a global runbook condition matched' : '';
-        return <>Runbook <b className="font-medium text-gray-900">{String(d.fileName ?? '')}</b> attached {why}</>;
+        // Re-selected for an open alert after runbooks or the rule changed (RunbookResync): say so.
+        const later = d.trigger ? `${d.previousRunbookId != null ? ', replacing the previous one,' : ''} after a runbook change` : '';
+        return <>Runbook <b className="font-medium text-gray-900">{String(d.fileName ?? '')}</b> attached {why}{later}</>;
       }
+      case 'RUNBOOK_DETACHED': return 'Runbook removed — it was deleted or no longer matches, and no other runbook applies';
       case 'ACK': return `Acknowledged by ${actorLabel(e.actor)}`;
       case 'RESOLVE': return `Resolved by ${actorLabel(e.actor)}`;
       case 'AUTO_CLOSE': return 'Resolved automatically: a recovery event matched the resolve condition';

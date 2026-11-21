@@ -90,6 +90,32 @@ When `AlertCreator` opens a new rule-based alert inside its `@Transactional` bou
 
 Attachment assigns `runbookRepository.getReferenceById(id)` (no extra `SELECT` on `runbooks`, never loading `content`), letting Hibernate dirty-checking persist `alerts.runbook_id` within the caller's transaction.
 
+The selection order lives in `RunbookSelector`, shared with the resync below, so both always pick the same way.
+
+### Keeping open alerts in sync (`RunbookResync`)
+
+An open alert (OPEN or ACKED) always shows the runbook that would be picked **now**. Whenever something that decides
+the pick changes — a runbook is **created**, **edited** (condition, team or file) or **deleted**, or a rule's
+**"always attach"** runbook changes — `RunbookResync` re-runs the selection above for every open rule alert, matched
+against the event that opened the alert:
+
+| Change | Effect on open alerts |
+|---|---|
+| new runbook matches | attached if it comes first in the order (e.g. a team runbook replaces a global pick; an older team runbook keeps winning a tie) |
+| edited condition / team | alerts it no longer matches move to the next match or lose their runbook; alerts it now matches get it if it comes first |
+| runbook deleted | its alerts move to the next match or lose their runbook — handled **before** the delete, so every alert is re-pointed visibly instead of being nulled silently by `ON DELETE SET NULL` |
+| rule "always attach" set / changed / removed | the rule's open alerts follow it |
+
+- Runs **in the same transaction** as the change (a `RunbookSelectionChanged` event from `RunbookCrudService` /
+  `RuleService`), selecting from a fresh catalog (`RunbookCache.load()`) that already sees the change — the change and
+  the alerts commit or roll back together.
+- Every change is audited by `system`: `RUNBOOK_ATTACHED` (details: `runbookId`, `fileName`, `reason`,
+  `previousRunbookId`, `trigger` such as `"runbook 7 updated"`) or `RUNBOOK_DETACHED` (`previousRunbookId`,
+  `trigger`), and pushed live to the UI after commit.
+- **Resolved alerts keep their runbook** — they record what the team used. UNROUTED alerts never get one.
+- Cost: one query for the open alerts per runbook change (index `idx_alerts_status`); fine for configuration edits,
+  which are rare compared to events.
+
 ---
 
 ## 5. Who Can Manage Runbooks

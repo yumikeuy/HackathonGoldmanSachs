@@ -2363,7 +2363,7 @@ export interface components {
             alertId?: number | null;
             /** @example anna@bank.com */
             actor: string;
-            /** @description ACK, RESOLVE, AUTO_CLOSE, RUNBOOK_ATTACHED, … (open list) */
+            /** @description ALERT_CREATED, ACK, RESOLVE, AUTO_CLOSE, RUNBOOK_ATTACHED, RUNBOOK_DETACHED, … (open list) */
             actionType: string;
             details: Record<string, never>;
             /** Format: date-time */

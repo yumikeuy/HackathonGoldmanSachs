@@ -1344,7 +1344,7 @@ components:
         actor: { type: string, example: anna@bank.com }
         actionType:
           type: string
-          description: ACK, RESOLVE, AUTO_CLOSE, RUNBOOK_ATTACHED, … (open list)
+          description: ALERT_CREATED, ACK, RESOLVE, AUTO_CLOSE, RUNBOOK_ATTACHED, RUNBOOK_DETACHED, … (open list)
         details: { type: object }
         createdAt: { type: string, format: date-time }
 

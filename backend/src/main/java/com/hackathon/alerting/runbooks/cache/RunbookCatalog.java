@@ -65,6 +65,20 @@ public record RunbookCatalog(
         return Optional.empty();
     }
 
+    /** This catalog without one runbook — what selection sees once that runbook is deleted. */
+    public RunbookCatalog without(long id) {
+        if (!byId.containsKey(id)) {
+            return this;
+        }
+        Map<Long, CompiledRunbook> remaining = new LinkedHashMap<>(byId);
+        remaining.remove(id);
+        Map<Long, List<CompiledRunbook>> remainingByTeam = new LinkedHashMap<>();
+        byTeamId.forEach((team, runbooks) ->
+                remainingByTeam.put(team, runbooks.stream().filter(runbook -> runbook.id() != id).toList()));
+        return new RunbookCatalog(remaining, remainingByTeam,
+                globalRunbooks.stream().filter(runbook -> runbook.id() != id).toList());
+    }
+
     /** Total number of runbooks in the catalog (team + global + override-only). */
     public int size() {
         return byId.size();
