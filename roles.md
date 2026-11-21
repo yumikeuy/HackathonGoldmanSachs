@@ -22,7 +22,8 @@ Phase 1's split is in git history (`git show 36d19b8:roles.md`).
 | Delivery: routing by preferences and hours, outbox worker, retries, rate limit, simulator | done (Role 1) |
 | Processing: routing, fingerprint, dedup, grouping, auto-close, UNROUTED, live push, rules + alerts API | done (Role 2) |
 | Condition engine (all operators, strict / flexible), audit trail + `GET /api/alerts/{id}/audit` | done (Role 3) |
-| **Runbooks**: upload / download API, cache, selection (`RunbookService.attach` is still a no-op) | **phase 2 — Role 3** |
+| **Runbooks API** (CRUD, multipart upload, file download) | written on branch `role3/runbooks-api` — **needs a test fix before merging** (§8 task 0) |
+| **Runbooks**: cache, selection (`RunbookService.attach` is still a no-op) | **phase 2 — Role 3** |
 | **Generator** `POST /api/dev/generate`, **k6 load test** | **phase 2 — Role 2** (moved from Role 3) |
 | **File source** (tail a log file), **seed data**, **smoke test**, **README / docs** | **phase 2 — Role 1** |
 | Metrics, team suggestions for unrouted alerts (bonus), hardening | phase 2 — every role in its area |
@@ -34,11 +35,10 @@ Phase 1's split is in git history (`git show 36d19b8:roles.md`).
 |---|---|
 | `openapi.yaml`: `GET /api/alerts/{id}/team-suggestions` + schema `TeamSuggestion` | Role 2 implements it, Role 4 builds the UI for it now — same contract |
 | `openapi.yaml`: config format of `file` sources (`{"path": …}`) | Role 1 implements, Role 4 shows the form field |
-| `openapi.yaml`: `x-planned: true` on the 8 operations not implemented yet | each role removes **its own** markers when it ships; Role 1's contract test checks "implemented ⇔ not planned" — no shared allow-list to edit |
+| `openapi.yaml`: `x-planned: true` on the operations not implemented yet — the generator and team suggestions (the runbooks API is written, so it carries none) | each role removes **its own** markers when it ships; Role 1's contract test checks "implemented ⇔ not planned" — no shared allow-list to edit |
 | `application.yml`: `alerting.dev.generator-enabled` (`DEV_GENERATOR_ENABLED`, default `true`) | Role 2 needs the switch, Role 1 owns the file |
 | `README.md` (Role 1) + one file per role in `docs/` | everyone documents only their own file |
 | `backend/src/test/resources/runbooks/` — sample runbooks (`.md`, `.txt`, `.yaml`) | used by Role 3's tests and Role 1's seed script |
-| `ExactPathFieldLocator` renamed to `DefaultJsonFieldLocator` | Role 2's tests use it; a later rename by Role 3 would have touched Role 2's files |
 | `dev` package now owned by Role 2 | generator moves from Role 3 to Role 2 |
 
 ---
@@ -74,7 +74,9 @@ Edit only your part; announce changes in chat **before** merging (Role 4 regener
 ## 5. Ground rules (unchanged from phase 1)
 
 1. **Branches**: `role1/…`, `role2/…`, `role3/…`; merge to `main` in small PRs, at least every ~2 hours; `main` always
-   builds, starts and passes `mvn test`.
+   builds, starts and passes `mvn test`. **Before opening a PR, merge the current `main` into your branch and run
+   `mvn test`** — git reports no conflict when another role removed or renamed a class you use, only the compiler does
+   (this happened to `role3/runbooks-api`, see §8 task 0).
 2. **Migrations**: never edit existing ones; new ones are timestamped — `V20261121_1430__runbooks_add_x.sql` — and only for
    your own tables.
 3. **Need something in another role's file** (a repository method, a property, a dependency)? Ask the owner in chat.
@@ -144,6 +146,11 @@ traffic generator, and make processing observable.
 
 ### Tasks, in order
 
+0. **Fix the flaky end-to-end test first** (it guards everybody's merges). Since config reloads go through Redis Pub/Sub,
+   they are asynchronous: `AlertPipelineIntegrationTest` creates a rule (or team) and sends events immediately, so an event
+   can be routed before `RoutingCache` reloaded — `ruleCreatedThroughTheApiTakesEffectWithoutRestart` timed out once in
+   review. After every configuration change the test must wait until the routing table contains the new rule/team
+   (e.g. `await().until(() -> routingCache.current()…)`) before sending events. Same for the `rule(…)` / `@BeforeEach` helpers.
 1. **Generator** (`dev`) — `POST /api/dev/generate`, schemas `GenerateRequest` / `GenerateAccepted`.
    - The controller exists only when `alerting.dev.generator-enabled=true` (`@ConditionalOnProperty`); otherwise 404.
    - Unknown or inactive `source` (`SourceCache.findActive`) → 400. Answers 202 at once; generation runs in the background
@@ -191,6 +198,16 @@ to it in the UI card, the email and the audit trail.
 
 ### Tasks, in order
 
+0. **Finish `role3/runbooks-api` and merge it** — the API itself is done and matches the contract (CRUD, multipart upload
+   with file-name cleaning and condition validation, download with `Content-Type` from the extension, `RUNBOOKS`
+   reload). The branch was cut from `main` before Role 1's merge, so it does not compile against today's `main`:
+   - merge the current `main` into the branch;
+   - `RunbookCrudServiceTest` imports `LocalConfigChangedPublisher`, which Role 1 replaced by the Redis publisher. Replace it
+     with a small test `ConfigChangedPublisher` that publishes `ConfigChangedEvent` after commit (≈ 15 lines; verified in
+     review: all 9 runbooks tests then pass);
+   - add a test for an upload over 10 MB → 413 `application/problem+json` (not covered yet);
+   - optional: also strip Windows paths (`C:\x\file.pdf`) from file names — `StringUtils.getFilename` handles `/` only;
+   - `mvn test` green, then merge. The runbooks operations in `openapi.yaml` carry no `x-planned` marker any more.
 1. **Runbook cache** (`runbooks.cache`): `RunbookRepository.findAllSummaries()` (never `content`) + teams' strict flags
    (`TeamRepository`); compile each condition once (team runbook → the team's `strict`, global → flexible). Load before Kafka
    consumers start (`SmartInitializingSingleton`, like `RoutingCache`); reload on `RUNBOOKS` and `TEAMS`. A stored condition
@@ -201,7 +218,7 @@ to it in the UI card, the email and the audit trail.
    Then `alert.attachRunbook(runbookRepository.getReferenceById(id))` and audit `RUNBOOK_ATTACHED`
    (actor `AuditLog.SYSTEM_ACTOR`, details `{runbookId, fileName, reason: "override" | "team" | "global"}`).
    Runs inside Role 2's creation transaction — cache only, no queries except the reference; never throw for "no match".
-3. **REST** (`runbooks.api`) per `openapi.yaml`, schemas `Runbook`, `RunbookUpload`, `RunbookUpdate`:
+3. ~~**REST**~~ — done on `role3/runbooks-api` (task 0). For reference, what it covers (`runbooks.api`), schemas `Runbook`, `RunbookUpload`, `RunbookUpdate`:
    - `GET /api/runbooks?teamId=` — that team's plus global runbooks (summaries, never bytes); without `teamId` all.
    - `POST` multipart: `file` required and non-empty; file name from `getOriginalFilename()` stripped of any path, ≤ 255
      chars; `teamId` must exist (400); `condition` is a JSON string → parse (400) and validate with `ConditionCompiler`
@@ -211,14 +228,17 @@ to it in the UI card, the email and the audit trail.
    - `GET /{id}/file`: `RunbookRepository.findFileById`; `Content-Type` from
      `MediaTypeFactory.getMediaType(fileName)` (fallback `application/octet-stream`); `Content-Disposition: inline` with the
      UTF-8 file name (`ContentDisposition` builder).
-   - Publish `ConfigKinds.RUNBOOKS` after every change. Remove the 6 `x-planned` markers of the `runbooks` tag in the same PR.
+   - Publish `ConfigKinds.RUNBOOKS` after every change.
 4. **Condition engine follow-ups** (from the phase-1 review):
    - reject unknown keys in leaves and in `and` / `or` nodes — a typo like `"vaule"` must be a 400, not a silent default;
    - document `exists: false` and "JSON null counts as absent" in `docs/conditions.md`, AGENTS.md §5 and the `LeafCondition`
      description in `openapi.yaml`;
    - decide AGENTS.md §11 q.2 (`not` node); if added, update the `Condition` schema and tell Role 4;
    - `PlaceholderTemplateRenderer`: remove the step-0 stub note (it is final), add tests for flexible placeholders;
-   - move `AuditEntry` out of `runbooks.api` into `runbooks.audit` (the service should not depend on the web layer).
+   - move `AuditEntry` out of `runbooks.api` into `runbooks.audit` (the service should not depend on the web layer);
+   - optional rename `ExactPathFieldLocator` → `DefaultJsonFieldLocator` (it does the flexible search too). Two tests of
+     Role 2 construct it (`RoutingCacheTest`, `FingerprintCalculatorTest`): announce in chat and change those two lines in
+     the same PR — the one agreed exception to the ownership rule.
 5. **Docs**: `docs/conditions.md` (every operator with an example on the sample events), `docs/runbooks.md`.
 
 ### Done when
@@ -232,7 +252,7 @@ email contains the download link, the audit shows `RUNBOOK_ATTACHED`, and the fi
 - **New endpoint** `GET /api/alerts/{id}/team-suggestions` for the unrouted page (`TeamSuggestion`).
 - **File sources**: the source form needs a `path` field for `type = file` (see `SourceInput.config`).
 - **`x-planned: true`** marks endpoints that are not live yet — keep their mocks; the marker disappears when the backend
-  ships them.
+  ships them. The **runbooks API** is live as soon as `role3/runbooks-api` is merged.
 - The generator (`POST /api/dev/generate`) can back a "send test events" button on the simulator page.
 
 ---
@@ -241,7 +261,8 @@ email contains the download link, the audit shows `RUNBOOK_ATTACHED`, and the fi
 
 | When | On `main` |
 |---|---|
-| ~3 h | runbook API + selection (Role 3); generator (Role 2); file source (Role 1) |
+| now | `role3/runbooks-api` fixed and merged (Role 3); flaky end-to-end test fixed (Role 2); then this branch |
+| ~3 h | runbook cache + selection (Role 3); generator (Role 2); file source (Role 1) |
 | ~6 h | seed + smoke pass on the compose stack; `burst.js` passes; contract test green with no `x-planned` left except bonuses |
 | final | demo dry run: fresh clone → compose → seed → UI scenario, twice in a row |
 

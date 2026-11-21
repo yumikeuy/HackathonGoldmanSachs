@@ -564,7 +564,6 @@ paths:
   /api/runbooks:
     get:
       tags: [runbooks]
-      x-planned: true
       summary: Runbooks without file contents
       description: With `teamId` — that team's runbooks plus global ones; without — all.
       parameters:
@@ -581,7 +580,6 @@ paths:
                 items: { $ref: '#/components/schemas/Runbook' }
     post:
       tags: [runbooks]
-      x-planned: true
       summary: Upload a runbook file of any format (max 10 MB)
       requestBody:
         required: true
@@ -600,7 +598,6 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
       tags: [runbooks]
-      x-planned: true
       summary: Runbook metadata
       responses:
         '200':
@@ -611,7 +608,6 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [runbooks]
-      x-planned: true
       summary: Update team, condition and optionally replace the file
       requestBody:
         required: true
@@ -628,7 +624,6 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     delete:
       tags: [runbooks]
-      x-planned: true
       summary: Delete a runbook (alerts and rules referencing it lose the link)
       responses:
         '204': { description: Deleted }
@@ -637,7 +632,6 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
       tags: [runbooks]
-      x-planned: true
       summary: Download the file as uploaded
       description: '`Content-Type` derived from the file extension; `Content-Disposition: inline; filename=…`.'
       responses:
