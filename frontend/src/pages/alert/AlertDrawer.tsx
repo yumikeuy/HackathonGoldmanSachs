@@ -56,10 +56,13 @@ export function AlertDrawer() {
     if (openAlertId == null) return;
     setDetail(null); setAudit([]); setDeliveries(null); setRaw(false); setError('');
     load(openAlertId);
-    api.getDeliveries(null, 200)
-      .then(p => setDeliveries(p.items.filter(d => d.alertId === openAlertId)))
-      .catch(() => setDeliveries([]));
-  }, [openAlertId, load]);
+    // the delivery log is simulator data, for administrators only (team isolation, docs/security.md)
+    if (admin) {
+      api.getDeliveries(null, 200)
+        .then(p => setDeliveries(p.items.filter(d => d.alertId === openAlertId)))
+        .catch(() => setDeliveries([]));
+    }
+  }, [openAlertId, load, admin]);
 
   const statusKey = summary ? `${summary.status}|${summary.runbookId}` : '';
   useEffect(() => { if (openAlertId != null && detail) load(openAlertId); }, [statusKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -222,7 +225,7 @@ export function AlertDrawer() {
                 ) : <div className="text-[13px] text-gray-400">Loading…</div>}
               </section>
 
-              <section>
+              {admin && <section>
                 <h3 className="text-sm font-semibold text-gray-900 mb-2">Notifications</h3>
                 {deliveries === null ? (
                   <div className="text-[13px] text-gray-400">Loading…</div>
@@ -244,7 +247,7 @@ export function AlertDrawer() {
                     ))}
                   </div>
                 )}
-              </section>
+              </section>}
 
               <section>
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Audit log</h3>
