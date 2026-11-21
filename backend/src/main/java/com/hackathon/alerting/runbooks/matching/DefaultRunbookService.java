@@ -1,18 +1,13 @@
 package com.hackathon.alerting.runbooks.matching;
 
 import com.hackathon.alerting.rules.model.Alert;
-import com.hackathon.alerting.rules.model.Rule;
 import com.hackathon.alerting.runbooks.RunbookService;
 import com.hackathon.alerting.runbooks.audit.AuditService;
-import com.hackathon.alerting.runbooks.cache.CompiledRunbook;
 import com.hackathon.alerting.runbooks.cache.RunbookCache;
-import com.hackathon.alerting.runbooks.cache.RunbookCatalog;
+import com.hackathon.alerting.runbooks.matching.RunbookSelector.Selection;
 import com.hackathon.alerting.runbooks.model.AuditActions;
 import com.hackathon.alerting.runbooks.model.AuditLog;
-import com.hackathon.alerting.runbooks.model.Runbook;
 import com.hackathon.alerting.runbooks.repository.RunbookRepository;
-import com.hackathon.alerting.runbooks.repository.RunbookSummary;
-import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,22 +27,25 @@ import java.util.Optional;
  *   <li>Alert's team runbook whose condition matches {@code event}, lowest id first (reason {@code "team"})</li>
  *   <li>Global runbook whose condition matches {@code event}, lowest id first (reason {@code "global"})</li>
  * </ol>
+ * The order itself lives in {@link RunbookSelector}, shared with {@link RunbookResync}.
  */
 @Service
 public class DefaultRunbookService implements RunbookService {
 
-    static final String REASON_OVERRIDE = "override";
-    static final String REASON_TEAM = "team";
-    static final String REASON_GLOBAL = "global";
+    static final String REASON_OVERRIDE = RunbookSelector.REASON_OVERRIDE;
+    static final String REASON_TEAM = RunbookSelector.REASON_TEAM;
+    static final String REASON_GLOBAL = RunbookSelector.REASON_GLOBAL;
 
     private final RunbookCache cache;
     private final RunbookRepository runbooks;
     private final AuditService audit;
+    private final RunbookSelector selector;
 
     public DefaultRunbookService(RunbookCache cache, RunbookRepository runbooks, AuditService audit) {
         this.cache = cache;
         this.runbooks = runbooks;
         this.audit = audit;
+        this.selector = new RunbookSelector(runbooks);
     }
 
     @Override
@@ -56,7 +54,7 @@ public class DefaultRunbookService implements RunbookService {
         if (alert == null) {
             return;
         }
-        Optional<Selection> selection = select(alert, event);
+        Optional<Selection> selection = selector.select(alert, event, cache.current());
         if (selection.isEmpty()) {
             return;
         }
@@ -72,46 +70,5 @@ public class DefaultRunbookService implements RunbookService {
         }
         details.put("reason", match.reason());
         audit.log(alert.getId(), AuditLog.SYSTEM_ACTOR, AuditActions.RUNBOOK_ATTACHED, details);
-    }
-
-    private Optional<Selection> select(Alert alert, JsonNode event) {
-        RunbookCatalog catalog = cache.current();
-
-        Rule rule = alert.getRule();
-        if (rule != null && rule.getOverrideRunbook() != null && rule.getOverrideRunbook().getId() != null) {
-            Runbook override = rule.getOverrideRunbook();
-            String fileName = resolveOverrideFileName(catalog, override);
-            return Optional.of(new Selection(override.getId(), fileName, REASON_OVERRIDE));
-        }
-
-        if (alert.getTeam() != null && alert.getTeam().getId() != null) {
-            Optional<CompiledRunbook> teamMatch = catalog.firstMatchingTeam(alert.getTeam().getId(), event);
-            if (teamMatch.isPresent()) {
-                return Optional.of(Selection.from(teamMatch.get(), REASON_TEAM));
-            }
-        }
-
-        return catalog.firstMatchingGlobal(event)
-                .map(rb -> Selection.from(rb, REASON_GLOBAL));
-    }
-
-    private String resolveOverrideFileName(RunbookCatalog catalog, Runbook override) {
-        Long id = override.getId();
-        Optional<CompiledRunbook> cached = catalog.findById(id);
-        if (cached.isPresent()) {
-            return cached.get().fileName();
-        }
-        Optional<String> fromDb = runbooks.findSummaryById(id)
-                .map(RunbookSummary::fileName);
-        if (fromDb.isPresent()) {
-            return fromDb.get();
-        }
-        return Hibernate.isInitialized(override) ? override.getFileName() : null;
-    }
-
-    private record Selection(long id, String fileName, String reason) {
-        private static Selection from(CompiledRunbook runbook, String reason) {
-            return new Selection(runbook.id(), runbook.fileName(), reason);
-        }
     }
 }

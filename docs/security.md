@@ -122,8 +122,15 @@ curl -X POST localhost:8080/api/auth/logout  -H 'Authorization: Bearer eyJ…' -
 | Role | May |
 |---|---|
 | `VIEWER` | every `GET /api/**`, rule dry-run, live feed |
-| `OPERATOR` | + ack, resolve, replay failed events |
-| `ADMIN` | + every other change: sources, teams, users, rules, runbooks, simulator switches, generator |
+| `OPERATOR` | + ack, resolve, replay failed events; create, edit and delete **runbooks of their own team** |
+| `ADMIN` | + every other change: sources, teams, users, rules, global runbooks, simulator switches, generator |
+
+**Team scope** (`TeamScopeInterceptor`): a VIEWER or OPERATOR works inside their own team — their team's alerts,
+rules, runbooks and users; unrouted alerts, sources, the simulator, failed events, the field catalog and dry-run are
+for administrators (403). Runbooks: everyone reads their team's and the global ones; an operator may create, edit and
+delete only runbooks of their own team — the stored runbook and the uploaded `teamId` must both be theirs. Global
+runbooks apply to every team, so creating, changing or deleting them, moving a runbook to another team or making it
+global is for administrators only (403). The UI mirrors these rules and hides what the server would refuse.
 
 Always open: `POST /api/auth/login|refresh`, `POST /api/ingest/{source}` (source API keys instead), UI pages, Swagger,
 `/actuator/health`. Errors: 401 (no/invalid token) and 403 (role too low) as problem+json.

@@ -15,8 +15,10 @@ public final class AuditActions {
     public static final String RESOLVE = "RESOLVE";
     /** The alert was resolved by the rule's {@code resolve_condition}. */
     public static final String AUTO_CLOSE = "AUTO_CLOSE";
-    /** A runbook was attached to a new alert. */
+    /** A runbook was attached to an alert — when it opened, or later because runbooks or the rule changed. */
     public static final String RUNBOOK_ATTACHED = "RUNBOOK_ATTACHED";
+    /** An open alert lost its runbook because none applies any more (deleted, or its condition changed). */
+    public static final String RUNBOOK_DETACHED = "RUNBOOK_DETACHED";
 
     private AuditActions() {
     }

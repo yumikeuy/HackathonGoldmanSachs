@@ -1635,7 +1635,12 @@ export interface paths {
             };
         };
         put?: never;
-        /** Upload a runbook file of any format (max 10 MB) */
+        /**
+         * Upload a runbook file of any format (max 10 MB)
+         * @description With login enforced: ADMIN for any runbook; OPERATOR for runbooks of their own team only — global runbooks,
+         *     other teams' runbooks and moving a runbook to another team or making it global are 403.
+         *
+         */
         post: {
             parameters: {
                 query?: never;
@@ -1659,6 +1664,13 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["BadRequest"];
+                /** @description Not allowed for this role or team (see the description) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
                 /** @description File larger than 10 MB */
                 413: {
                     headers: {
@@ -1707,7 +1719,12 @@ export interface paths {
                 404: components["responses"]["NotFound"];
             };
         };
-        /** Update team, condition and optionally replace the file */
+        /**
+         * Update team, condition and optionally replace the file
+         * @description With login enforced: ADMIN for any runbook; OPERATOR for runbooks of their own team only — global runbooks,
+         *     other teams' runbooks and moving a runbook to another team or making it global are 403.
+         *
+         */
         put: {
             parameters: {
                 query?: never;
@@ -1733,11 +1750,23 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["BadRequest"];
+                /** @description Not allowed for this role or team (see the description) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
                 404: components["responses"]["NotFound"];
             };
         };
         post?: never;
-        /** Delete a runbook (alerts and rules referencing it lose the link) */
+        /**
+         * Delete a runbook (alerts and rules referencing it lose the link)
+         * @description With login enforced: ADMIN for any runbook; OPERATOR for runbooks of their own team only — global runbooks,
+         *     other teams' runbooks and moving a runbook to another team or making it global are 403.
+         *
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -1751,6 +1780,13 @@ export interface paths {
             responses: {
                 /** @description Deleted */
                 204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not allowed for this role or team (see the description) */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2028,8 +2064,10 @@ export interface components {
             /**
              * @description Type-specific settings:
              *     - `kafka`: `{"topic": "workflow.events"}` — consume this external topic;
-             *     - `file`: `{"path": "/data/logs/app.log"}` — tail this file (path inside the backend container);
-             *       each new line is one event: a JSON line as is, any other line as `{"message": "<line>"}`;
+             *     - `file`: `{"path": "/data/logs/app.log", "pattern": "(?<level>[A-Z]+) (?<service>[\\w-]+): .*"}` — tail this
+             *       file (path inside the backend container); each new line is one event: a JSON line as is; a line matching
+             *       the optional `pattern` (Java regex with named groups) as its groups plus `message`; any other line as
+             *       `{"message": "<line>"}`. An invalid pattern or one without named groups → 400;
              *     - `http`: `{}` — events arrive at `POST /api/ingest/{name}`.
              *
              * @default {}
@@ -2112,7 +2150,7 @@ export interface components {
             password?: string;
         };
         /**
-         * @description VIEWER reads; OPERATOR also acks/resolves/replays; ADMIN also changes configuration.
+         * @description VIEWER reads; OPERATOR also acks/resolves/replays and manages the runbooks of their own team; ADMIN also changes configuration.
          * @default VIEWER
          * @enum {string}
          */
@@ -2325,7 +2363,7 @@ export interface components {
             alertId?: number | null;
             /** @example anna@bank.com */
             actor: string;
-            /** @description ACK, RESOLVE, AUTO_CLOSE, RUNBOOK_ATTACHED, … (open list) */
+            /** @description ALERT_CREATED, ACK, RESOLVE, AUTO_CLOSE, RUNBOOK_ATTACHED, RUNBOOK_DETACHED, … (open list) */
             actionType: string;
             details: Record<string, never>;
             /** Format: date-time */

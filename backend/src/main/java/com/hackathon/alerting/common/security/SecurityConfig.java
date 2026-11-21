@@ -34,8 +34,9 @@ import java.util.List;
  *       runbook files with a valid signed link, UI pages, Swagger, {@code /ws} handshake (STOMP CONNECT is checked
  *       by {@link StompAuthInterceptor}), actuator health/prometheus</td></tr>
  *   <tr><th>VIEWER</th><td>every {@code GET /api/**}, {@code POST /api/rules/dry-run}, logout</td></tr>
- *   <tr><th>OPERATOR</th><td>ack, resolve, replay of failed events</td></tr>
- *   <tr><th>ADMIN</th><td>every other change: sources, teams, users, rules, runbooks, simulator, generator</td></tr>
+ *   <tr><th>OPERATOR</th><td>ack, resolve, replay of failed events; create, edit and delete runbooks of their own team
+ *       ({@link TeamScopeInterceptor} enforces the team; global runbooks stay with administrators)</td></tr>
+ *   <tr><th>ADMIN</th><td>every other change: sources, teams, users, rules, global runbooks, simulator, generator</td></tr>
  * </table>
  * Stateless: no session, no cookies, hence no CSRF tokens. Errors are RFC 9457 problem+json (401 / 403).
  *
@@ -77,6 +78,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/rules/dry-run", "/api/auth/logout").hasRole("VIEWER")
                         .requestMatchers(HttpMethod.POST, "/api/alerts/*/ack", "/api/alerts/*/resolve", "/api/events/*/replay")
                         .hasRole("OPERATOR")
+                        // runbooks of the operator's own team — TeamScopeInterceptor checks the team
+                        .requestMatchers(HttpMethod.POST, "/api/runbooks").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/runbooks/*").hasRole("OPERATOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/runbooks/*").hasRole("OPERATOR")
                         .requestMatchers("/api/**").hasRole("ADMIN")
                         .anyRequest().permitAll())
                 .oauth2ResourceServer(o -> o

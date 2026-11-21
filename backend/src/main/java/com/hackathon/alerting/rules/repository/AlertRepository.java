@@ -60,6 +60,13 @@ public interface AlertRepository extends JpaRepository<Alert, Long>, AlertJdbcOp
     Window<Alert> findByTeamIsNullAndStatusInOrderByLastSeenAtDescIdAsc(Collection<AlertStatus> statuses,
                                                                         ScrollPosition position, Limit limit);
 
+    /**
+     * Open rule alerts (not UNROUTED) with their rule fetched — the alerts whose runbook {@code RunbookResync}
+     * re-selects after a runbook or rule changed. Served by index {@code idx_alerts_status}.
+     */
+    @EntityGraph(attributePaths = "rule")
+    List<Alert> findByStatusInAndRuleIsNotNull(Collection<AlertStatus> statuses);
+
     /** Alerts with their rule fetched, for pushing counter updates of many alerts at once. */
     @EntityGraph(attributePaths = "rule")
     List<Alert> findWithRuleByIdIn(Collection<Long> ids);

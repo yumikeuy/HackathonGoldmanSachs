@@ -12,7 +12,7 @@ import { useStore } from '../../state/store';
 import { useToast } from '../../components/Toast';
 import { ConditionBuilder } from '../../components/ConditionBuilder';
 import { ChipsInput } from '../../components/ChipsInput';
-import { CHAN, CHANNELS, ErrorBox, JsonView, Modal, ModalHead, SEV, SevBars, Toggle, cx } from '../../components/ui';
+import { CHAN, CHANNELS, ErrorBox, JsonView, Modal, ModalHead, SEV, Section, SevBars, Toggle, cx } from '../../components/ui';
 import { condLeaves, fromEditor, getPath, newGroup, renderTemplate, toEditor, treeErrors, type EdGroup } from '../../utils/condition';
 import { fmtNum } from '../../utils/format';
 import type { Channel, Condition, DryRunResult, GroupMode, RuleInput, Severity } from '../../types';
@@ -27,15 +27,6 @@ interface Draft {
 const MATCH_ALL: Condition = { path: '__match_all__', op: 'exists', value: false };
 
 interface DryState { loading: boolean; error: string; team?: DryRunResult; all?: DryRunResult }
-
-function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
-  return (
-    <section className="space-y-3">
-      <div><h4 className="text-[15px] font-semibold text-gray-900">{title}</h4>{sub && <p className="text-[13px] text-gray-500 mt-0.5">{sub}</p>}</div>
-      {children}
-    </section>
-  );
-}
 
 const openings = new WeakMap<object, number>();
 let openingSeq = 0;

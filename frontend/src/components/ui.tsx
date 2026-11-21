@@ -132,6 +132,16 @@ export const Spinner = ({ label = 'Loading…' }: { label?: string }) => (
   <div className="flex items-center justify-center gap-2 py-14 text-[13px] text-gray-500"><Loader className="w-4 h-4 spin" />{label}</div>
 );
 
+/** A titled block of an editor modal (rule editor, runbook editor). */
+export function Section({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <div><h4 className="text-[15px] font-semibold text-gray-900">{title}</h4>{sub && <p className="text-[13px] text-gray-500 mt-0.5">{sub}</p>}</div>
+      {children}
+    </section>
+  );
+}
+
 export const ErrorBox = ({ children }: { children: ReactNode }) => (
   <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">{children}</div>
 );
