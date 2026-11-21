@@ -138,6 +138,14 @@ public class OutboxTask {
         this.nextRetryAt = Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
     }
 
+    /**
+     * Not attempted yet: try again at {@code at} without counting a failure (rate limit {@code rl:} reached).
+     */
+    public void postpone(Instant at) {
+        requirePending();
+        this.nextRetryAt = Objects.requireNonNull(at, "at");
+    }
+
     /** Retries exhausted — permanent failure. */
     public void markFailed(String error) {
         requirePending();

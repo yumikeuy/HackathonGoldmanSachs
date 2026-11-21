@@ -1,0 +1,70 @@
+package com.hackathon.alerting.ingest.source;
+
+import com.hackathon.alerting.common.config.KafkaTopics;
+import com.hackathon.alerting.common.web.ServiceUnavailableException;
+import com.hackathon.alerting.ingest.envelope.EventEnvelope;
+import com.hackathon.alerting.ingest.fields.FieldCatalog;
+import com.hackathon.alerting.ingest.model.SourceType;
+import com.hackathon.alerting.ingest.recent.RecentEvents;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+/**
+ * Puts an event into {@code events.ingest}: wraps it in an {@link EventEnvelope} (server time, new id) and
+ * waits for Kafka's acknowledgement ({@code acks=all}). Only then the event counts as accepted; afterwards it is
+ * remembered in {@link RecentEvents} and the {@link FieldCatalog}. Used by HTTP and external Kafka sources.
+ */
+@Service
+public class EventIngestor {
+
+    private final KafkaTemplate<String, String> kafka;
+    private final JsonMapper json;
+    private final Clock clock;
+    private final RecentEvents recentEvents;
+    private final FieldCatalog fieldCatalog;
+    private final Duration sendTimeout;
+
+    public EventIngestor(KafkaTemplate<String, String> kafka, JsonMapper json, Clock clock, RecentEvents recentEvents,
+                         FieldCatalog fieldCatalog, @Value("${alerting.ingest.send-timeout:5s}") Duration sendTimeout) {
+        this.kafka = kafka;
+        this.json = json;
+        this.clock = clock;
+        this.recentEvents = recentEvents;
+        this.fieldCatalog = fieldCatalog;
+        this.sendTimeout = sendTimeout;
+    }
+
+    /**
+     * @return the envelope Kafka acknowledged
+     * @throws ServiceUnavailableException if Kafka did not acknowledge within the timeout (HTTP 503)
+     */
+    public EventEnvelope ingest(SourceType type, String sourceName, JsonNode payload) {
+        EventEnvelope envelope = EventEnvelope.create(type, sourceName, payload, clock);
+        send(envelope);
+        recentEvents.add(payload);
+        fieldCatalog.record(payload);
+        return envelope;
+    }
+
+    /** Sends a ready envelope (e.g. a replay) and waits for the acknowledgement. */
+    public void send(EventEnvelope envelope) {
+        try {
+            kafka.send(KafkaTopics.EVENTS_INGEST, envelope.sourceName(), json.writeValueAsString(envelope))
+                    .get(sendTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ServiceUnavailableException("Interrupted while waiting for Kafka", e);
+        } catch (ExecutionException | TimeoutException | RuntimeException e) {
+            throw new ServiceUnavailableException("Kafka is unavailable, retry later", e);
+        }
+    }
+}

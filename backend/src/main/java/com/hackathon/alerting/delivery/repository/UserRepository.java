@@ -2,6 +2,7 @@ package com.hackathon.alerting.delivery.repository;
 
 import com.hackathon.alerting.delivery.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
@@ -21,4 +22,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     /** Everyone who can receive notifications, for the cache. */
     List<User> findAllByActiveTrueOrderByIdAsc();
+
+    /** Active users with their team fetched, for the delivery routing cache (entities are used detached). */
+    @Query("select u from User u join fetch u.team where u.active = true order by u.id")
+    List<User> findAllActiveWithTeam();
 }
