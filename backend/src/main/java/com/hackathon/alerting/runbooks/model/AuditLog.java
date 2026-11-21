@@ -3,8 +3,6 @@ package com.hackathon.alerting.runbooks.model;
 import com.hackathon.alerting.rules.model.Alert;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -37,6 +35,10 @@ public class AuditLog {
 
     /** Actor for actions performed by the service itself. */
     public static final String SYSTEM_ACTOR = "system";
+    /** Length of {@code audit_logs.actor}. */
+    public static final int ACTOR_MAX_LENGTH = 100;
+    /** Length of {@code audit_logs.action_type}. */
+    public static final int ACTION_TYPE_MAX_LENGTH = 50;
 
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "audit_logs_id_gen")
@@ -49,12 +51,12 @@ public class AuditLog {
     private Alert alert;
 
     /** Who did it: a user email, {@link #SYSTEM_ACTOR} or {@code rule:7} (see {@link #ruleActor}). */
-    @Column(name = "actor", nullable = false, length = 100)
+    @Column(name = "actor", nullable = false, length = ACTOR_MAX_LENGTH)
     private String actor;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "action_type", nullable = false, length = 50)
-    private AuditAction actionType;
+    /** What was done, e.g. {@link AuditActions#ACK}; free-form, up to 50 characters. */
+    @Column(name = "action_type", nullable = false, length = ACTION_TYPE_MAX_LENGTH)
+    private String actionType;
 
     /** Free-form details of the action. Always a JSON object. */
     @JdbcTypeCode(SqlTypes.JSON)
@@ -72,13 +74,14 @@ public class AuditLog {
     /**
      * @param alert      the alert, or {@code null}
      * @param actor      who performed the action
-     * @param actionType what was done
+     * @param actionType what was done, see {@link AuditActions}
      * @param details    extra data; {@code null} means an empty object
+     * @throws IllegalArgumentException if actor or actionType is blank or longer than its column
      */
-    public AuditLog(Alert alert, String actor, AuditAction actionType, JsonNode details) {
+    public AuditLog(Alert alert, String actor, String actionType, JsonNode details) {
         this.alert = alert;
-        this.actor = Objects.requireNonNull(actor, "actor");
-        this.actionType = Objects.requireNonNull(actionType, "actionType");
+        this.actor = requireText(actor, "actor", ACTOR_MAX_LENGTH);
+        this.actionType = requireText(actionType, "actionType", ACTION_TYPE_MAX_LENGTH);
         this.details = details == null ? JsonNodeFactory.instance.objectNode() : details;
     }
 
@@ -99,7 +102,7 @@ public class AuditLog {
         return actor;
     }
 
-    public AuditAction getActionType() {
+    public String getActionType() {
         return actionType;
     }
 
@@ -109,6 +112,14 @@ public class AuditLog {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    private static String requireText(String value, String name, int maxLength) {
+        Objects.requireNonNull(value, name);
+        if (value.isBlank() || value.length() > maxLength) {
+            throw new IllegalArgumentException(name + " must be 1.." + maxLength + " characters, got '" + value + "'");
+        }
+        return value;
     }
 
     @Override
@@ -129,6 +140,6 @@ public class AuditLog {
 
     @Override
     public String toString() {
-        return "AuditLog{id=" + id + ", actor='" + actor + "', actionType=" + actionType + '}';
+        return "AuditLog{id=" + id + ", actor='" + actor + "', actionType='" + actionType + "'}";
     }
 }

@@ -1,4 +1,4 @@
 /**
- * getByPath и findByKey: доступ к полям JsonNode по пути и по имени ключа. Владелец: Роль 2.
+ * getByPath and findByKey: access to JsonNode fields by path and by key name; {{path}} substitution. Owner: Role 3.
  */
 package com.hackathon.alerting.common.json;

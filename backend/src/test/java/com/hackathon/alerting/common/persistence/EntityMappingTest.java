@@ -17,20 +17,15 @@ import com.hackathon.alerting.rules.model.GroupMode;
 import com.hackathon.alerting.rules.model.Presentation;
 import com.hackathon.alerting.rules.model.Rule;
 import com.hackathon.alerting.rules.model.Severity;
-import com.hackathon.alerting.runbooks.model.AuditAction;
+import com.hackathon.alerting.runbooks.model.AuditActions;
 import com.hackathon.alerting.runbooks.model.AuditLog;
 import com.hackathon.alerting.runbooks.model.Runbook;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import com.hackathon.alerting.support.JpaRepositoryTest;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -50,14 +45,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * JSONB round-trips through Jackson 3, lowercase enum codes, lazy runbook content,
  * pooled sequences and the database invariants the entities rely on.
  */
-@DataJpaTest
-@Testcontainers
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@JpaRepositoryTest
 class EntityMappingTest {
-
-    @Container
-    @ServiceConnection
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16");
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.MICROS);
@@ -102,7 +91,7 @@ class EntityMappingTest {
 
         em.persist(OutboxTask.toUser(alert, user, Channel.EMAIL, json("{\"subject\":\"Rejected T-1\"}")));
         em.persist(OutboxTask.toTeamFeed(alert, team, json("{\"title\":\"Rejected T-1\"}")));
-        em.persist(new AuditLog(alert, AuditLog.SYSTEM_ACTOR, AuditAction.RUNBOOK_ATTACHED, json("{\"runbookId\":" + runbook.getId() + "}")));
+        em.persist(new AuditLog(alert, AuditLog.SYSTEM_ACTOR, AuditActions.RUNBOOK_ATTACHED, json("{\"runbookId\":" + runbook.getId() + "}")));
         em.flush();
         em.clear();
 
@@ -231,7 +220,7 @@ class EntityMappingTest {
     void deletingAnAlertCascadesToItsOutboxAndAuditButKeepsEvents() {
         Fixture f = fixture();
         em.persist(OutboxTask.toUser(f.alert, f.user, Channel.EMAIL, json("{}")));
-        em.persist(new AuditLog(f.alert, "anna@bank.com", AuditAction.ACK, null));
+        em.persist(new AuditLog(f.alert, "anna@bank.com", AuditActions.ACK, null));
         UUID eventId = UUID.randomUUID();
         em.persist(Event.failed(eventId, "legacy", NOW, json("{}"), "boom"));
         em.flush();

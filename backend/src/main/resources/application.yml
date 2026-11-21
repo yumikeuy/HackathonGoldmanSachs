@@ -24,6 +24,9 @@ spring:
       hibernate.type.json_format_mapper: jackson3
   flyway:
     locations: classpath:db/migration
+    # New migrations are named by timestamp (V20261121_1430__rules_add_x.sql) so parallel branches
+    # never clash on version numbers; out-of-order lets a branch merged later still apply its older version.
+    out-of-order: true
   data:
     redis:
       host: ${REDIS_HOST:localhost}
