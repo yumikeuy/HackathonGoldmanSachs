@@ -7,8 +7,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * STEP-0 STUB of {@link TemplateRenderer} (owner Role 3): resolves placeholders by exact path through
- * {@link JsonFieldLocator}. Already close to final; Role 3 owns and may refine it.
+ * Default {@link TemplateRenderer} implementation (owner: Role 3): resolves {@code {{path}}}
+ * placeholders through {@link JsonFieldLocator} in flexible mode, rendering absent or {@code null}
+ * values as empty strings.
  */
 @Component
 public class PlaceholderTemplateRenderer implements TemplateRenderer {

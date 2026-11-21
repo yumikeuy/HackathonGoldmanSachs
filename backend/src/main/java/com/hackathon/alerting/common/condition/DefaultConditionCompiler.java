@@ -7,6 +7,7 @@ import tools.jackson.databind.JsonNode;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -72,7 +73,10 @@ public class DefaultConditionCompiler implements ConditionCompiler {
 
     private List<Predicate<JsonNode>> compileChildren(JsonNode array, String where, boolean strict) {
         if (array == null || !array.isArray()) {
-            throw new InvalidConditionException("'" + where + "' must be an array");
+            throw new InvalidConditionException("'" + where + "' must not be null and must be an array");
+        }
+        if (array.isEmpty()) {
+            throw new InvalidConditionException("'" + where + "' must not be empty");
         }
         List<Predicate<JsonNode>> result = new ArrayList<>(array.size());
         for (int i = 0; i < array.size(); i++) {
@@ -82,6 +86,12 @@ public class DefaultConditionCompiler implements ConditionCompiler {
     }
 
     private Predicate<JsonNode> compileLeaf(JsonNode node, String where, boolean strict) {
+        for (Map.Entry<String, JsonNode> entry : node.properties()) {
+            String key = entry.getKey();
+            if (!"path".equals(key) && !"op".equals(key) && !"value".equals(key)) {
+                throw new InvalidConditionException("Unknown property '" + key + "' in condition leaf at " + where);
+            }
+        }
         JsonNode pathNode = node.get("path");
         JsonNode opNode = node.get("op");
         if (pathNode == null || !pathNode.isString() || pathNode.asString().isBlank()
@@ -89,6 +99,9 @@ public class DefaultConditionCompiler implements ConditionCompiler {
             throw new InvalidConditionException("Condition leaf at " + where + " needs 'path' and 'op'");
         }
         String path = pathNode.asString();
+        if (!isValidPath(path)) {
+            throw new InvalidConditionException("Invalid path '" + path + "' at " + where);
+        }
         String opSymbol = opNode.asString();
         ConditionOperator operator = ConditionOperator.fromSymbol(opSymbol)
                 .orElseThrow(() -> new InvalidConditionException("Unknown operator '" + opSymbol + "' at " + where));
@@ -119,7 +132,8 @@ public class DefaultConditionCompiler implements ConditionCompiler {
 
     private Predicate<JsonNode> compileNumericComparison(String path, ConditionOperator op, JsonNode expected,
                                                          String where, boolean strict) {
-        BigDecimal expectedNumber = extractNumber(expected, strict)
+        // Condition thresholds must always be JSON numbers so flipping team strictness later never breaks them.
+        BigDecimal expectedNumber = extractNumber(expected, true)
                 .orElseThrow(() -> new InvalidConditionException(
                         "Operator '" + op.symbol() + "' at " + where + " requires a numeric 'value'"));
         return event -> fields.find(event, path, strict)
@@ -138,15 +152,22 @@ public class DefaultConditionCompiler implements ConditionCompiler {
     }
 
     private Predicate<JsonNode> compileMembership(String path, JsonNode expected, String where, boolean strict, boolean positive) {
-        if (expected == null || !expected.isArray()) {
-            String op = positive ? "in" : "not_in";
-            throw new InvalidConditionException("Operator '" + op + "' at " + where + " requires an array 'value'");
+        String op = positive ? "in" : "not_in";
+        if (expected == null || !expected.isArray() || expected.isEmpty()) {
+            throw new InvalidConditionException("Operator '" + op + "' at " + where + " requires a non-empty array 'value'");
         }
-        List<JsonNode> candidates = List.copyOf(expected.values());
+        List<JsonNode> candidates = new ArrayList<>(expected.size());
+        for (JsonNode candidate : expected.values()) {
+            if (candidate == null || candidate.isNull()) {
+                throw new InvalidConditionException("Operator '" + op + "' at " + where + " must not contain null elements");
+            }
+            candidates.add(candidate);
+        }
+        List<JsonNode> immutableCandidates = List.copyOf(candidates);
         return event -> fields.find(event, path, strict)
                 .map(actual -> {
-                    for (JsonNode candidate : candidates) {
-                        if (candidate != null && !candidate.isNull() && valuesEqual(actual, candidate, strict)) {
+                    for (JsonNode candidate : immutableCandidates) {
+                        if (valuesEqual(actual, candidate, strict)) {
                             return positive;
                         }
                     }
@@ -240,6 +261,18 @@ public class DefaultConditionCompiler implements ConditionCompiler {
             }
         }
         return Optional.empty();
+    }
+
+    private static boolean isValidPath(String path) {
+        if (!path.equals(path.trim())) {
+            return false;
+        }
+        for (String segment : path.split("\\.", -1)) {
+            if (segment.isBlank()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Pattern globToRegex(String glob) {

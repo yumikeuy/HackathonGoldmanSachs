@@ -13,8 +13,9 @@ import java.util.Optional;
  *
  * <ul>
  *   <li>{@code strict = true}: exact dotted path only (object keys and numeric array indices).</li>
- *   <li>{@code strict = false}: tries exact dotted path first; if absent or JSON {@code null},
- *       falls back to breadth-first search by the last path segment (case-insensitive).</li>
+ *   <li>{@code strict = false}: tries exact dotted path first; if absent, falls back to breadth-first
+ *       search by the last path segment (case-insensitive). An explicit JSON {@code null} at the exact
+ *       path counts as absent and does not fall back to another key.</li>
  * </ul>
  */
 @Component
@@ -25,9 +26,12 @@ public class ExactPathFieldLocator implements JsonFieldLocator {
         if (event == null || event.isNull() || path == null || path.isBlank()) {
             return Optional.empty();
         }
-        Optional<JsonNode> exact = findExactPath(event, path);
-        if (exact.isPresent() || strict) {
-            return exact;
+        JsonNode exact = findExactNode(event, path);
+        if (exact != null) {
+            return exact.isNull() ? Optional.empty() : Optional.of(exact);
+        }
+        if (strict) {
+            return Optional.empty();
         }
         int lastDot = path.lastIndexOf('.');
         String key = lastDot >= 0 ? path.substring(lastDot + 1) : path;
@@ -37,25 +41,26 @@ public class ExactPathFieldLocator implements JsonFieldLocator {
         return findByKeyBfs(event, key);
     }
 
-    private static Optional<JsonNode> findExactPath(JsonNode root, String path) {
+    /** Returns the resolved node (including {@code NullNode} if explicitly JSON {@code null}), or Java {@code null} if absent. */
+    private static JsonNode findExactNode(JsonNode root, String path) {
         JsonNode current = root;
         for (String segment : path.split("\\.", -1)) {
             if (segment.isEmpty() || current == null) {
-                return Optional.empty();
+                return null;
             }
             if (current.isObject()) {
                 current = current.get(segment);
             } else if (current.isArray()) {
                 int index = parseArrayIndex(segment);
                 if (index < 0 || index >= current.size()) {
-                    return Optional.empty();
+                    return null;
                 }
                 current = current.get(index);
             } else {
-                return Optional.empty();
+                return null;
             }
         }
-        return current == null || current.isNull() ? Optional.empty() : Optional.of(current);
+        return current;
     }
 
     private static Optional<JsonNode> findByKeyBfs(JsonNode root, String key) {
