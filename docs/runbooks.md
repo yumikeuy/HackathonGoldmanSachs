@@ -1,5 +1,7 @@
 # Runbooks
 
+> Owner: **Role 3**. Code: `backend/src/main/java/com/hackathon/alerting/runbooks`. See also [conditions.md](conditions.md) and [operations.md](operations.md).
+
 Runbooks are operational instructions (Markdown, PDF, plain text, YAML, images, scripts, etc.) attached automatically to alerts and linked in UI cards and outgoing notifications.
 
 ---
@@ -25,7 +27,7 @@ All endpoints live in `runbooks.api` (`RunbookController`, `RunbookCrudService`)
 | `GET /api/runbooks/{id}` | Get metadata | `404` if missing. |
 | `PUT /api/runbooks/{id}` | Update `teamId`, `condition`, and optionally replace `file` | `file` is optional; omitting `file` keeps the existing filename and bytes. |
 | `DELETE /api/runbooks/{id}` | Delete runbook | Returns `204`. Referenced `rules.override_runbook_id` and `alerts.runbook_id` clear safely via `ON DELETE SET NULL`. |
-| `GET /api/runbooks/{id}/file` | Download raw file bytes | Sets `Content-Type` from `fileName` via `MediaTypeFactory.getMediaType` (fallback `application/octet-stream`) and `Content-Disposition: inline; filename*=UTF-8''...`. |
+| `GET /api/runbooks/{id}/file` | Download raw file bytes | Sets `Content-Type` from `fileName`: Spring `MediaTypeFactory.getMediaType` plus explicit mappings for `.md`/`.markdown` (`text/markdown`) and `.yaml`/`.yml` (`application/yaml`), falling back to `application/octet-stream`; `Content-Disposition: inline; filename*=UTF-8''...`. |
 
 ### Filename Sanitization & Upload Limit
 
@@ -34,7 +36,7 @@ All endpoints live in `runbooks.api` (`RunbookController`, `RunbookCrudService`)
 
 ### Sample `curl` Requests
 
-Using the sample fixtures in `backend/src/test/resources/runbooks/`:
+[`infra/seed/seed.sh`](../infra/seed/seed.sh) automatically uploads the three sample runbooks below into a running environment. You can also upload and download them manually from `backend/src/test/resources/runbooks/`:
 
 ```bash
 # 1. Team-scoped Markdown runbook (Team Rates = teamId 1)
@@ -79,11 +81,11 @@ Implemented in `runbooks.cache` (`RunbookCache`, `RunbookCatalog`, `CompiledRunb
 
 ## 4. Automatic Selection Priority (`RunbookService.attach`)
 
-When `AlertCreator` opens a new alert inside its `@Transactional` boundary, it invokes `RunbookService.attach(alert, rawPayload)` (`DefaultRunbookService`):
+When `AlertCreator` opens a new rule-based alert inside its `@Transactional` boundary (`Propagation.MANDATORY`), it invokes `RunbookService.attach(alert, rawPayload)` (`DefaultRunbookService`). (`UnroutedEventHandler` does not attach runbooks to `UNROUTED` alerts; see [processing.md](processing.md).)
 
 1. **Rule override (`reason: "override"`)** — if `alert.getRule().getOverrideRunbook()` is set, attach that runbook regardless of its `condition` (this is the only way a runbook with `condition = null` attaches).
 2. **Team runbooks (`reason: "team"`)** — otherwise, if `alert.getTeam()` is set, select the first (lowest `id`) cached runbook belonging to that team whose compiled condition matches the event.
-3. **Global runbooks (`reason: "global"`)** — otherwise, select the first (lowest `id`) cached global runbook (`team_id IS NULL`) whose compiled condition matches the event. (Applies both when a team has no matching team runbook and for unrouted alerts where `team == null`.)
+3. **Global runbooks (`reason: "global"`)** — otherwise, select the first (lowest `id`) cached global runbook (`team_id IS NULL`) whose compiled condition matches the event when no team runbook matched.
 4. **No match** — leaves `alert.runbook` `null` and returns silently without throwing.
 
 Attachment assigns `runbookRepository.getReferenceById(id)` (no extra `SELECT` on `runbooks`, never loading `content`), letting Hibernate dirty-checking persist `alerts.runbook_id` within the caller's transaction.

@@ -1,8 +1,8 @@
 # Condition Language
 
-The alerting engine evaluates rules, team routing, auto-resolution, and runbook matching against arbitrary JSON event payloads without hardcoded schemas. Every configurable condition uses the same recursive JSON tree structure, compiled once per configuration reload into an in-memory `Predicate<JsonNode>`.
+> Owner: **Role 3**. Code: `backend/src/main/java/com/hackathon/alerting/common/condition`, `common/json`.
 
-Implementation lives in `common.condition` (`DefaultConditionCompiler`, `ConditionOperator`, `InvalidConditionException`) and `common.json` (`ExactPathFieldLocator`, `PlaceholderTemplateRenderer`).
+The alerting engine evaluates rules, team routing, auto-resolution, and runbook matching against arbitrary JSON event payloads without hardcoded schemas. Every configurable condition uses the same recursive JSON tree structure, compiled once per configuration reload into an in-memory `Predicate<JsonNode>`.
 
 ---
 
@@ -22,9 +22,9 @@ Implementation lives in `common.condition` (`DefaultConditionCompiler`, `Conditi
 
 A condition tree is made of three JSON object node shapes:
 
-- **Conjunction (`and`)** — matches when every child condition matches (`{"and": [ <Condition>, ... ]}`). Must not have other properties.
-- **Disjunction (`or`)** — matches when at least one child condition matches (`{"or": [ <Condition>, ... ]}`). Must not have other properties.
-- **Leaf predicate** — tests one field against an operator (`{"path": "<dotted.path>", "op": "<operator>", "value": <operand>}`). Only `"path"`, `"op"`, and optional `"value"` keys are allowed; any unknown property (such as a misspelled `"vaule"`) is rejected at save time with HTTP 400.
+- **Conjunction (`and`)** — matches when every child condition matches (`{"and": [ <Condition>, ... ]}`). Array must be non-empty; object must not have other properties.
+- **Disjunction (`or`)** — matches when at least one child condition matches (`{"or": [ <Condition>, ... ]}`). Array must be non-empty; object must not have other properties.
+- **Leaf predicate** — tests one field against an operator (`{"path": "<dotted.path>", "op": "<operator>", "value": <operand>}`). Only `"path"`, `"op"`, and optional `"value"` keys are allowed; any unknown property (such as a misspelled `"vaule"`) is rejected at save time with HTTP 400. `path` must not contain surrounding whitespace or empty segments (such as `".a"`, `"a."`, or `"a..b"`).
 
 > **Note on negation:** A `{"not": ...}` wrapper node is intentionally omitted. Use `!=`, `not_in`, or `{"op": "exists", "value": false}` for negative checks.
 
@@ -59,12 +59,12 @@ Examples below use the shared fixtures in `backend/src/test/resources/events/`:
 |---|---|---|---|
 | `==` | Non-null JSON scalar/value | Equals operand. Compares numbers mathematically (`10 == 10.0`); in flexible mode (`strict = false`) coerces numeric strings (`"15000000" == 15000000`). | `{"path":"trade.notional","op":"==","value":15000000}` → `true` on `rates-trade-rejected.json` (`strict = false`) |
 | `!=` | Non-null JSON scalar/value | Not equal to operand (same numeric/flexible coercion rules). **Returns `false` if the field is missing or JSON `null`.** | `{"path":"status","op":"!=","value":"OK"}` → `true` on `pricing-workflow-failed.json` |
-| `>` | Number (or numeric string when `strict = false`) | Strictly greater than `value` (`BigDecimal` comparison). | `{"path":"trade.notional","op":">","value":10000000}` → `true` on `rates-trade-rejected.json` and `alien-schema.json` (`strict = false`) |
-| `>=` | Number (or numeric string when `strict = false`) | Greater than or equal to `value`. | `{"path":"attempt","op":">=","value":3}` → `true` on `pricing-workflow-failed.json` |
-| `<` | Number (or numeric string when `strict = false`) | Strictly less than `value`. | `{"path":"value","op":"<","value":100}` → `true` on `infra-cpu-high.json` |
-| `<=` | Number (or numeric string when `strict = false`) | Less than or equal to `value`. | `{"path":"value","op":"<=","value":97.5}` → `true` on `infra-cpu-high.json` |
-| `in` | JSON array | `true` if actual value equals any non-null element in `value`. | `{"path":"metric","op":"in","value":["cpu","memory"]}` → `true` on `infra-cpu-high.json` |
-| `not_in` | JSON array | `true` if the field exists (non-null) and matches no non-null element in `value`. **Returns `false` if missing or JSON `null`.** | `{"path":"region","op":"not_in","value":["us-east-1","ap-south-1"]}` → `true` on `infra-cpu-high.json` |
+| `>` | JSON number (event field may be a numeric string when `strict = false`) | Strictly greater than `value` (`BigDecimal` comparison). | `{"path":"trade.notional","op":">","value":10000000}` → `true` on `rates-trade-rejected.json` and `alien-schema.json` (`strict = false`) |
+| `>=` | JSON number (event field may be a numeric string when `strict = false`) | Greater than or equal to `value`. | `{"path":"attempt","op":">=","value":3}` → `true` on `pricing-workflow-failed.json` |
+| `<` | JSON number (event field may be a numeric string when `strict = false`) | Strictly less than `value`. | `{"path":"value","op":"<","value":100}` → `true` on `infra-cpu-high.json` |
+| `<=` | JSON number (event field may be a numeric string when `strict = false`) | Less than or equal to `value`. | `{"path":"value","op":"<=","value":97.5}` → `true` on `infra-cpu-high.json` |
+| `in` | Non-empty JSON array (no `null` elements) | `true` if actual value equals any element in `value`. | `{"path":"metric","op":"in","value":["cpu","memory"]}` → `true` on `infra-cpu-high.json` |
+| `not_in` | Non-empty JSON array (no `null` elements) | `true` if the field exists (non-null) and matches no element in `value`. **Returns `false` if missing or JSON `null`.** | `{"path":"region","op":"not_in","value":["us-east-1","ap-south-1"]}` → `true` on `infra-cpu-high.json` |
 | `contains` | String | `true` if actual value is a JSON string containing `value` as a substring (case-sensitive). | `{"path":"error","op":"contains","value":"Timeout"}` → `true` on `pricing-workflow-failed.json` |
 | `regex` | String (Java `Pattern`) | Compiled once on load. `true` if actual value is a JSON string where `Pattern.matcher(actual).find()` succeeds. | `{"path":"trade.currency","op":"regex","value":"^(EUR|USD)$"}` → `true` on `rates-trade-rejected.json` |
 | `glob` | String (`*` and `?` wildcards) | Regex metacharacters are escaped literally; `*` matches any characters, `?` matches one character, anchored across the whole string (`^...$`). | `{"path":"host","op":"glob","value":"prod-??-*"}` → `true` on `infra-cpu-high.json` |
@@ -80,9 +80,10 @@ Path resolution is controlled by `teams.strict` (always `false` for global runbo
    Segments split on `.` walk nested objects and numeric zero-based array indices (for example, `labels.service` or `items.0.price`).
 
 2. **Flexible key fallback (`strict = false` only):**
-   - If the exact dotted path is absent or JSON `null`, the locator takes the last segment of `path` (for `trade.notional`, the segment is `notional`) and performs a **breadth-first search** across the entire JSON payload, matching object keys **case-insensitively**.
+   - If the exact dotted path is absent in the payload, the locator takes the last segment of `path` (for `trade.notional`, the segment is `notional`) and performs a **breadth-first search** across the entire JSON payload, matching object keys **case-insensitively**.
+   - If the exact path **is** present with an explicit JSON `null` value (for example `{"trade":{"notional":null},"other":{"notional":999}}`), `trade.notional` counts as absent immediately and does **not** fall back to `other.notional`.
    - On `alien-schema.json`, `{"path":"trade.notional","op":">","value":10000000}` misses `trade.notional` at root, searches for key `notional`, finds `Body.Deal.Economics.Notional = 25000000`, and returns `true`.
-   - **Numeric string coercion (`strict = false` only):** string values representing numbers (such as `"15000000"` in `rates-trade-rejected.json`) coerce to `BigDecimal` for `>`, `>=`, `<`, `<=`, `==`, `!=`, `in`, and `not_in`. With `strict = true`, `"15000000" > 10000000` and `"15000000" == 15000000` both evaluate to `false`.
+   - **Numeric string coercion (`strict = false` only):** incoming event string values representing numbers (such as `"15000000"` in `rates-trade-rejected.json`) coerce to `BigDecimal` for `>`, `>=`, `<`, `<=`, `==`, `!=`, `in`, and `not_in`. Condition thresholds in `>`, `>=`, `<`, `<=` must always be JSON numbers so later toggling `teams.strict` cannot break stored conditions. With `strict = true`, `"15000000" > 10000000` and `"15000000" == 15000000` both evaluate to `false`.
 
 ---
 
@@ -98,15 +99,18 @@ A missing field and a field whose value is JSON `null` (`{"reason": null}`) both
 
 ## 6. Validation Errors and Compilation
 
-Conditions are validated synchronously whenever saved through the REST API (`teams`, `rules`, `runbooks`). Invalid trees fail with HTTP `400 Bad Request` (`application/problem+json`) containing `detail` and the exact JSON node path (starting at `$`):
+Conditions are validated synchronously whenever saved through the REST API (`teams`, `rules`, `runbooks`). Invalid trees fail with HTTP `400 Bad Request` (`application/problem+json`) containing `detail` and the exact JSON node path (starting at `$`). Endpoints under `/api/rules` and `/api/runbooks` prefix `detail` with `condition: ` (or `resolveCondition: `); `/api/teams` returns the compiler detail directly:
 
 | Invalid input | `detail` message |
 |---|---|
 | `{"and":[{"path":"a","op":"equals","value":1}]}` | `Unknown operator 'equals' at $.and[0]` |
 | `{"path":"a","op":"==","value":1,"vaule":2}` | `Unknown property 'vaule' in condition leaf at $` |
+| `{"and":[]}` | `'$.and' must not be empty` |
 | `{"and":[],"extra":1}` | `'and' node at $ must not have other properties` |
+| `{"path":"trade.","op":"==","value":1}` | `Invalid path 'trade.' at $` |
+| `{"path":"a","op":">","value":"90"}` | `Operator '>' at $ requires a numeric 'value'` |
 | `{"path":"a","op":"regex","value":"[unclosed"}` | `Invalid regex at $: Unclosed character class` |
-| `{"path":"a","op":"in","value":"EUR"}` | `Operator 'in' at $ requires an array 'value'` |
+| `{"path":"a","op":"in","value":"EUR"}` | `Operator 'in' at $ requires a non-empty array 'value'` |
 
 Once stored, conditions are compiled **once** during cache reloads (`RoutingCache` and `RunbookCache`), pre-compiling regex/glob `Pattern` objects and `BigDecimal` literals so event processing executes zero parsing and zero database queries per event. If a previously persisted condition ever fails compilation during reload, that entry is logged and skipped so it cannot block the remaining configuration.
 
