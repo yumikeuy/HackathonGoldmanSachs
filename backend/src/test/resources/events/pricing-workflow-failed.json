@@ -1,0 +1,9 @@
+{
+  "workflow": "eod-pricing",
+  "team": "pricing",
+  "status": "FAILED",
+  "step": "load-curves",
+  "error": "Timeout while fetching USD curve from market-data",
+  "attempt": 3,
+  "startedAt": "2026-11-21T00:10:00Z"
+}
