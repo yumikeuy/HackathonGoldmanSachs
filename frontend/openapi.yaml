@@ -724,6 +724,9 @@ paths:
     post:
       tags: [runbooks]
       summary: Upload a runbook file of any format (max 10 MB)
+      description: |
+        With login enforced: ADMIN for any runbook; OPERATOR for runbooks of their own team only — global runbooks,
+        other teams' runbooks and moving a runbook to another team or making it global are 403.
       requestBody:
         required: true
         content:
@@ -736,6 +739,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Runbook' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Not allowed for this role or team (see the description) }
         '413': { description: File larger than 10 MB }
   /api/runbooks/{id}:
     parameters: [{ $ref: '#/components/parameters/Id' }]
@@ -752,6 +756,9 @@ paths:
     put:
       tags: [runbooks]
       summary: Update team, condition and optionally replace the file
+      description: |
+        With login enforced: ADMIN for any runbook; OPERATOR for runbooks of their own team only — global runbooks,
+        other teams' runbooks and moving a runbook to another team or making it global are 403.
       requestBody:
         required: true
         content:
@@ -764,12 +771,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Runbook' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Not allowed for this role or team (see the description) }
         '404': { $ref: '#/components/responses/NotFound' }
     delete:
       tags: [runbooks]
       summary: Delete a runbook (alerts and rules referencing it lose the link)
+      description: |
+        With login enforced: ADMIN for any runbook; OPERATOR for runbooks of their own team only — global runbooks,
+        other teams' runbooks and moving a runbook to another team or making it global are 403.
       responses:
         '204': { description: Deleted }
+        '403': { description: Not allowed for this role or team (see the description) }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/runbooks/{id}/file:
     parameters: [{ $ref: '#/components/parameters/Id' }]
@@ -821,7 +833,8 @@ components:
       bearerFormat: JWT
       description: |
         Access token from `POST /api/auth/login` (15 min). Required on `/api/**` only when the server runs with
-        `JWT_ENABLED=true`: GET → VIEWER, ack/resolve/replay → OPERATOR, every other change → ADMIN.
+        `JWT_ENABLED=true`: GET → VIEWER, ack/resolve/replay and runbooks of the own team → OPERATOR,
+        every other change → ADMIN.
         WebSocket: send it as the STOMP CONNECT header `Authorization: Bearer …`.
   parameters:
     Id:
@@ -1112,7 +1125,7 @@ components:
       type: string
       enum: [VIEWER, OPERATOR, ADMIN]
       default: VIEWER
-      description: VIEWER reads; OPERATOR also acks/resolves/replays; ADMIN also changes configuration.
+      description: VIEWER reads; OPERATOR also acks/resolves/replays and manages the runbooks of their own team; ADMIN also changes configuration.
     LoginRequest:
       type: object
       required: [email, password]

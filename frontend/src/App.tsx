@@ -8,6 +8,7 @@ import { AlertDrawer } from './pages/alert/AlertDrawer';
 import { UnroutedPage } from './pages/unrouted/UnroutedPage';
 import { RulesPage } from './pages/rules/RulesPage';
 import { RuleEditor } from './pages/rules/RuleEditor';
+import { RunbookEditor } from './pages/runbooks/RunbookEditor';
 import { RunbooksPage } from './pages/runbooks/RunbooksPage';
 import { RecipientsPage } from './pages/recipients/RecipientsPage';
 import { SourcesPage } from './pages/sources/SourcesPage';
@@ -45,6 +46,7 @@ export function App() {
           </Layout>
           <AlertDrawer />
           <RuleEditor />
+          <RunbookEditor />
         </StoreProvider>
         </AuthGate>
       </ToastProvider>

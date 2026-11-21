@@ -14,6 +14,12 @@ import { useToast } from '../components/Toast';
 import { SEV } from '../components/ui';
 import type { AlertSummary, Delivery, FieldInfo, Rule, RuleInput, Runbook, Source, Team, User } from '../types';
 
+/** The runbook editor: an existing runbook to view / edit, or a new upload (optionally with a file already chosen). */
+export interface RunbookEditorState {
+  runbook?: Runbook;
+  file?: File;
+}
+
 export interface RuleEditorState {
   rule?: Rule;
   prefill?: Partial<RuleInput>;
@@ -45,6 +51,7 @@ interface Store {
 
   openAlertId: number | null; openAlert: (id: number) => void; closeAlert: () => void;
   ruleEditor: RuleEditorState | null; openRuleEditor: (s: RuleEditorState) => void; closeRuleEditor: () => void;
+  runbookEditor: RunbookEditorState | null; openRunbookEditor: (s: RunbookEditorState) => void; closeRunbookEditor: () => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -255,6 +262,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [ruleEditor, setRuleEditor] = useState<RuleEditorState | null>(null);
   const openRuleEditor = useCallback((s: RuleEditorState) => { setOpenAlertId(null); setRuleEditor(s); }, []);
   const closeRuleEditor = useCallback(() => setRuleEditor(null), []);
+  const [runbookEditor, setRunbookEditor] = useState<RunbookEditorState | null>(null);
+  const openRunbookEditor = useCallback((s: RunbookEditorState) => { setOpenAlertId(null); setRunbookEditor(s); }, []);
+  const closeRunbookEditor = useCallback(() => setRunbookEditor(null), []);
 
   const alerts = useMemo(() => [...alertMap.values()], [alertMap]);
 
@@ -266,6 +276,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     failedCount, failedMore, refreshFailed,
     fields, loadFields,
     openAlertId, openAlert, closeAlert, ruleEditor, openRuleEditor, closeRuleEditor,
+    runbookEditor, openRunbookEditor, closeRunbookEditor,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
