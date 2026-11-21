@@ -1,5 +1,7 @@
 package com.hackathon.alerting.runbooks;
 
+import com.hackathon.alerting.common.security.TeamScopeConfig;
+import com.hackathon.alerting.common.security.TeamScopeInterceptor;
 import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.runbooks.api.AuditController;
 import com.hackathon.alerting.runbooks.audit.AuditEntry;
@@ -8,6 +10,8 @@ import com.hackathon.alerting.runbooks.model.AuditActions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -22,7 +26,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(AuditController.class)
+/*
+ * The team-scope interceptor is left out of this web slice: Spring Boot adds every WebMvcConfigurer and
+ * HandlerInterceptor to a @WebMvcTest, but TeamScopeInterceptor needs AuthSettings and repositories that a slice does
+ * not load. It is inactive while login is off (as here) and is covered by AuthIntegrationTest.
+ */
+@WebMvcTest(value = AuditController.class,
+        excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
+                classes = {TeamScopeConfig.class, TeamScopeInterceptor.class}))
 class AuditControllerTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();

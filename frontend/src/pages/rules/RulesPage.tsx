@@ -9,8 +9,10 @@ import { ChanBadge, CondHuman, ConfirmModal, Empty, PageIntro, PageWrap, Scope, 
 import { condText } from '../../utils/condition';
 import { groupingLabel, ruleToInput } from '../../utils/rules';
 import type { Rule } from '../../types';
+import { usePermissions } from '../../auth/permissions';
 
 export function RulesPage() {
+  const { admin } = usePermissions();
   const { rules, teams, configLoaded, teamName, reloadRules, openRuleEditor } = useStore();
   const toast = useToast();
   const [q, setQ] = useState('');
@@ -60,7 +62,7 @@ export function RulesPage() {
               {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             <Search value={q} onChange={setQ} placeholder="Search rules…" className="w-56" />
-            <button className="btn btn-dark" onClick={() => openRuleEditor({ prefill: teamFilter !== 'all' ? { teamId: teamFilter } : {} })}><Plus className="w-4 h-4" />New rule</button>
+            {admin && <button className="btn btn-dark" onClick={() => openRuleEditor({ prefill: teamFilter !== 'all' ? { teamId: teamFilter } : {} })}><Plus className="w-4 h-4" />New rule</button>}
           </>
         }
       >
@@ -90,14 +92,14 @@ export function RulesPage() {
                   {(r.groupByPaths ?? []).length > 0 && <div className="text-xs text-gray-400">by {r.groupByPaths!.join(', ')}</div>}
                 </td>
                 <td className="td text-[13px] text-gray-600">{r.priority}</td>
-                <td className="td"><Toggle on={r.active ?? true} onChange={() => toggle(r)} label="Rule active" /></td>
+                <td className="td"><Toggle on={r.active ?? true} onChange={() => toggle(r)} label="Rule active" disabled={!admin} /></td>
                 <td className="td pr-5">
-                  <div className="flex justify-end gap-0.5" onClick={e => e.stopPropagation()}>
+                  {admin && <div className="flex justify-end gap-0.5" onClick={e => e.stopPropagation()}>
                     <button className="btn btn-ghost btn-sm w-7 px-0" title="Duplicate" onClick={() => openRuleEditor({ prefill: { ...ruleToInput(r), name: `${r.name} (copy)`, priority: (r.priority ?? 100) + 1 } })}>
                       <Copy className="w-3.5 h-3.5" />
                     </button>
                     <button className="btn btn-ghost btn-sm w-7 px-0 hover:!text-red-600" title="Delete" onClick={() => setDeleting(r)}><Trash2 className="w-3.5 h-3.5" /></button>
-                  </div>
+                  </div>}
                 </td>
               </tr>
             )) : (

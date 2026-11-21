@@ -3,6 +3,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react
 import { NavLink, useLocation } from 'react-router-dom';
 import { Bell, BellRing, BookOpen, CircleX, LogOut, Menu, Pause, Radio, Split, TriangleAlert, Users, Workflow, Zap, type LucideIcon } from 'lucide-react';
 import { session } from '../auth/session';
+import { RESTRICTED_PATHS, usePermissions } from '../auth/permissions';
 import { useStore } from '../state/store';
 import { cx } from './ui';
 
@@ -58,7 +59,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   useEffect(() => setNavOpen(false), [loc.pathname]);
 
-  const current = ROUTES.find(r => loc.pathname.startsWith(r.path)) ?? ROUTES[0];
+  const perms = usePermissions();
+  const routes = perms.restricted ? ROUTES.filter(r => RESTRICTED_PATHS.includes(r.path)) : ROUTES;
+  const current = routes.find(r => loc.pathname.startsWith(r.path)) ?? routes[0];
   useEffect(() => { document.title = `${current.label} · Alerting`; }, [current.label]);
 
   const active = alerts.filter(a => a.status !== 'RESOLVED');
@@ -79,7 +82,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <span className="text-[17px] font-bold tracking-tight text-white">Alerting</span>
         </div>
         <nav className="flex-1 overflow-y-auto py-3">
-          {ROUTES.map(r => {
+          {routes.map(r => {
             const Ic = r.icon;
             return (
               <NavLink key={r.path} to={r.path} className={({ isActive }) => cx('nav-item', isActive && 'active')}>

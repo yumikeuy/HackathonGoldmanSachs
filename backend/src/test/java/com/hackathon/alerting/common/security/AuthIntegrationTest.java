@@ -4,6 +4,11 @@ import com.hackathon.alerting.support.KafkaTestConfiguration;
 import com.hackathon.alerting.support.PostgresTestConfiguration;
 import com.hackathon.alerting.support.RedisTestConfiguration;
 import org.junit.jupiter.api.Test;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.lang.reflect.Type;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -23,14 +28,17 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
 import tools.jackson.databind.JsonNode;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 /** UI login with {@code alerting.security.jwt.enabled=true}: tokens, roles, rotation, signed links, WebSocket. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
@@ -44,6 +52,8 @@ class AuthIntegrationTest {
 
     @Value("${local.server.port}")
     private int port;
+    @Autowired
+    private SimpMessagingTemplate websocket;
 
     private RestClient http() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
@@ -181,6 +191,109 @@ class AuthIntegrationTest {
                 .get(10, TimeUnit.SECONDS);
         assertThat(session.isConnected()).isTrue();
         session.disconnect();
+    }
+
+    @Test
+    void nonAdministratorsSeeOnlyTheirOwnTeam() throws Exception {
+        String admin = login(ADMIN_EMAIL, ADMIN_PASSWORD).get("accessToken").asString();
+        String marker = UUID.randomUUID().toString();
+        long teamA = createTeamWithRule(admin, "A-" + marker);
+        long teamB = createTeamWithRule(admin, "B-" + marker);
+        String source = "iso-" + marker;
+        http().post().uri("/api/sources").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("name", source, "type", "http")).retrieve().toBodilessEntity();
+        long alertA = awaitAlert(admin, teamA, source, "A-" + marker);
+        long alertB = awaitAlert(admin, teamB, source, "B-" + marker);
+        long ruleB = http().get().uri("/api/rules?teamId={t}", teamB).header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .retrieve().body(JsonNode.class).get(0).get("id").asLong();
+
+        String viewer = createUserAndLogin(admin, teamA, "VIEWER");
+        String operator = createUserAndLogin(admin, teamA, "OPERATOR");
+
+        JsonNode teams = http().get().uri("/api/teams").header(HttpHeaders.AUTHORIZATION, "Bearer " + viewer).retrieve().body(JsonNode.class);
+        assertThat(teams).hasSize(1);
+        assertThat(teams.get(0).get("id").asLong()).isEqualTo(teamA);
+        JsonNode users = http().get().uri("/api/users").header(HttpHeaders.AUTHORIZATION, "Bearer " + viewer).retrieve().body(JsonNode.class);
+        users.forEach(u -> assertThat(u.get("teamId").asLong()).isEqualTo(teamA));
+
+        assertThat(status("GET", "/api/alerts?teamId=" + teamA, viewer, null)).isEqualTo(200);
+        assertThat(status("GET", "/api/alerts?teamId=" + teamB, viewer, null)).isEqualTo(403);
+        assertThat(status("GET", "/api/alerts", viewer, null)).isEqualTo(403);
+        assertThat(status("GET", "/api/alerts?unrouted=true", viewer, null)).isEqualTo(403);
+        assertThat(status("GET", "/api/alerts/" + alertA, viewer, null)).isEqualTo(200);
+        assertThat(status("GET", "/api/alerts/" + alertB, viewer, null)).isEqualTo(403);
+        assertThat(status("GET", "/api/alerts/" + alertB + "/audit", viewer, null)).isEqualTo(403);
+        assertThat(status("GET", "/api/rules?teamId=" + teamB, viewer, null)).isEqualTo(403);
+        assertThat(status("GET", "/api/rules/" + ruleB, viewer, null)).isEqualTo(403);
+        assertThat(status("GET", "/api/teams/" + teamB, viewer, null)).isEqualTo(404);
+        for (String adminOnly : new String[]{"/api/sources", "/api/simulator/deliveries", "/api/events/failed", "/api/fields",
+                "/api/ingest/lag", "/api/alerts/" + alertA + "/team-suggestions"}) {
+            assertThat(status("GET", adminOnly, viewer, null)).as(adminOnly).isEqualTo(403);
+        }
+
+        assertThat(status("POST", "/api/alerts/" + alertB + "/ack", operator, Map.of())).isEqualTo(403);
+        assertThat(status("POST", "/api/alerts/" + alertA + "/ack", operator, Map.of())).isEqualTo(200);
+        assertThat(status("GET", "/api/alerts?teamId=" + teamB, admin, null)).isEqualTo(200);
+        assertThat(status("GET", "/api/alerts?unrouted=true", admin, null)).isEqualTo(200);
+
+        // the live feed: own team only
+        assertThat(receives(viewer, "/topic/alerts/" + teamA)).as("own team feed").isTrue();
+        assertThat(receives(viewer, "/topic/alerts/" + teamB)).as("other team feed").isFalse();
+        assertThat(receives(viewer, "/topic/unrouted")).as("unrouted feed").isFalse();
+        assertThat(receives(admin, "/topic/unrouted")).as("admin: unrouted feed").isTrue();
+    }
+
+    private long createTeamWithRule(String admin, String desk) {
+        long teamId = http().post().uri("/api/teams").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("name", "Team " + desk, "condition", Map.of("path", "desk", "op", "==", "value", desk)))
+                .retrieve().body(JsonNode.class).get("id").asLong();
+        http().post().uri("/api/rules").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("teamId", teamId, "name", "All of " + desk, "channels", new String[]{"UI"})).retrieve().toBodilessEntity();
+        return teamId;
+    }
+
+    private long awaitAlert(String admin, long teamId, String source, String desk) {
+        AtomicLong id = new AtomicLong();
+        await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofSeconds(1)).until(() -> {
+            http().post().uri("/api/ingest/{s}", source).contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"desk\":\"" + desk + "\"}").retrieve().toBodilessEntity();
+            JsonNode items = http().get().uri("/api/alerts?teamId={t}", teamId).header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                    .retrieve().body(JsonNode.class).get("items");
+            if (items.isEmpty()) {
+                return false;
+            }
+            id.set(items.get(0).get("id").asLong());
+            return true;
+        });
+        return id.get();
+    }
+
+    /** Subscribes, then the server broadcasts to the destination: true if the message reached this client. */
+    private boolean receives(String token, String destination) throws Exception {
+        WebSocketStompClient stomp = new WebSocketStompClient(new StandardWebSocketClient());
+        StompHeaders connect = new StompHeaders();
+        connect.add("Authorization", "Bearer " + token);
+        StompSession session = stomp.connectAsync("ws://localhost:" + port + "/ws", new WebSocketHttpHeaders(), connect,
+                new StompSessionHandlerAdapter() { }).get(10, TimeUnit.SECONDS);
+        BlockingQueue<Object> received = new LinkedBlockingQueue<>();
+        session.subscribe(destination, new StompSessionHandlerAdapter() {
+            @Override
+            public Type getPayloadType(StompHeaders headers) {
+                return byte[].class;
+            }
+
+            @Override
+            public void handleFrame(StompHeaders headers, Object payload) {
+                received.add(payload);
+            }
+        });
+        Thread.sleep(500);
+        websocket.convertAndSend(destination, (Object) Map.of("probe", true));
+        boolean got = received.poll(3, TimeUnit.SECONDS) != null;
+        assertThat(session.isConnected()).as("the connection survives a refused subscription").isTrue();
+        session.disconnect();
+        return got;
     }
 
     // ------------------------------------------------------------------ helpers

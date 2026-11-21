@@ -14,6 +14,7 @@ import { CondHuman, ConfirmModal, Empty, FileGlyph, PageIntro, PageWrap, Scope, 
 import { fromEditor, toEditor, treeErrors, type EdGroup } from '../../utils/condition';
 import { fmtBytes } from '../../utils/format';
 import type { Runbook } from '../../types';
+import { usePermissions } from '../../auth/permissions';
 
 interface Stage {
   runbook: Runbook | null;    // null — new upload
@@ -27,6 +28,7 @@ interface Stage {
 }
 
 export function RunbooksPage() {
+  const { admin } = usePermissions();
   const { runbooks, rules, teams, configLoaded, teamName, reloadRunbooks, reloadRules } = useStore();
   const toast = useToast();
   const [q, setQ] = useState('');
@@ -108,7 +110,7 @@ export function RunbooksPage() {
         shown, never executed.
       </PageIntro>
 
-      {!stage && (
+      {admin && !stage && (
         <div
           onClick={() => fileInput.current?.click()}
           onDragOver={e => { e.preventDefault(); setDrag(true); }}
@@ -205,8 +207,8 @@ export function RunbooksPage() {
                     <div className="flex justify-end gap-1">
                       <a className="btn btn-white btn-sm" href={rb.fileUrl} target="_blank" rel="noreferrer"
                          onClick={e => { e.preventDefault(); api.openRunbook(rb.id).catch(err => toast({ title: 'Could not open the runbook', body: errorText(err), tone: 'err' })); }}><Download className="w-3.5 h-3.5" />Open</a>
-                      <button className="btn btn-ghost btn-sm w-7 px-0" title="Edit" onClick={() => stageEdit(rb)}><Pencil className="w-3.5 h-3.5" /></button>
-                      <button className="btn btn-ghost btn-sm w-7 px-0 hover:!text-red-600" title="Delete" onClick={() => setDeleting(rb)}><Trash2 className="w-3.5 h-3.5" /></button>
+                      {admin && <button className="btn btn-ghost btn-sm w-7 px-0" title="Edit" onClick={() => stageEdit(rb)}><Pencil className="w-3.5 h-3.5" /></button>}
+                      {admin && <button className="btn btn-ghost btn-sm w-7 px-0 hover:!text-red-600" title="Delete" onClick={() => setDeleting(rb)}><Trash2 className="w-3.5 h-3.5" /></button>}
                     </div>
                   </td>
                 </tr>

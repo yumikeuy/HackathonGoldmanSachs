@@ -9,6 +9,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as api from '../api/endpoints';
 import { errorText } from '../api/client';
 import { live, type LiveStatus } from '../ws/live';
+import { permissionsOf } from '../auth/permissions';
 import { useToast } from '../components/Toast';
 import { SEV } from '../components/ui';
 import type { AlertSummary, Delivery, FieldInfo, Rule, RuleInput, Runbook, Source, Team, User } from '../types';
@@ -67,10 +68,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [configError, setConfigError] = useState<string | null>(null);
 
   const reloadTeams = useCallback(async () => setTeams(await api.getTeams()), []);
-  const reloadRules = useCallback(async () => setRules(await api.getRules()), []);
-  const reloadRunbooks = useCallback(async () => setRunbooks(await api.getRunbooks()), []);
+  // A user limited to their team asks for that team only; sources are for administrators (docs/security.md).
+  const reloadRules = useCallback(async () => setRules(await api.getRules(permissionsOf().teamId ?? undefined)), []);
+  const reloadRunbooks = useCallback(async () => setRunbooks(await api.getRunbooks(permissionsOf().teamId ?? undefined)), []);
   const reloadUsers = useCallback(async () => setUsers(await api.getUsers()), []);
-  const reloadSources = useCallback(async () => setSources(await api.getSources()), []);
+  const reloadSources = useCallback(async () => setSources(permissionsOf().admin ? await api.getSources() : []), []);
 
   useEffect(() => {
     Promise.all([reloadTeams(), reloadRules(), reloadRunbooks(), reloadUsers(), reloadSources()])
@@ -105,7 +107,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const ids = teamIds ? teamIds.split(',').map(Number) : [];
     const pages = await Promise.all([
       ...ids.map(teamId => api.getAlerts({ teamId, status })),
-      api.getAlerts({ unrouted: true, status }),
+      ...(permissionsOf().admin ? [api.getAlerts({ unrouted: true, status })] : []),
     ]);
     return pages.flatMap(p => p.items);
   }, [teamIds]);
@@ -196,7 +198,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const push = (body: unknown) => { queue.current.push(body as AlertSummary); };
-    const unsubs = [live.subscribe('/topic/unrouted', push)];
+    const unsubs = permissionsOf().admin ? [live.subscribe('/topic/unrouted', push)] : [];
     if (teamIds) teamIds.split(',').forEach(id => unsubs.push(live.subscribe(`/topic/alerts/${id}`, push)));
     return () => unsubs.forEach(u => u());
   }, [teamIds]);
@@ -211,7 +213,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [applyQueue, toast]);
 
   const deliveryListeners = useRef(new Set<(d: Delivery) => void>());
-  useEffect(() => live.subscribe('/topic/simulator', body => deliveryListeners.current.forEach(l => l(body as Delivery))), []);
+  useEffect(() => (permissionsOf().admin
+    ? live.subscribe('/topic/simulator', body => deliveryListeners.current.forEach(l => l(body as Delivery)))
+    : () => {}), []);
   const onDelivery = useCallback((cb: (d: Delivery) => void) => {
     deliveryListeners.current.add(cb);
     return () => { deliveryListeners.current.delete(cb); };
@@ -221,6 +225,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [failedCount, setFailedCount] = useState(0);
   const [failedMore, setFailedMore] = useState(false);
   const refreshFailed = useCallback(async () => {
+    if (!permissionsOf().admin) return;
     try {
       const p = await api.getFailedEvents(null, 200);
       setFailedCount(p.items.length);
@@ -237,7 +242,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [fields, setFields] = useState<FieldInfo[]>([]);
   const fieldsAt = useRef(0);
   const loadFields = useCallback(async () => {
-    if (Date.now() - fieldsAt.current < 10000) return;
+    if (!permissionsOf().admin || Date.now() - fieldsAt.current < 10000) return;
     fieldsAt.current = Date.now();
     try { setFields(await api.getFields()); } catch { /* autocomplete is optional */ }
   }, []);

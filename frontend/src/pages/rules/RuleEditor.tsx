@@ -16,6 +16,7 @@ import { CHAN, CHANNELS, ErrorBox, JsonView, Modal, ModalHead, SEV, SevBars, Tog
 import { condLeaves, fromEditor, getPath, newGroup, renderTemplate, toEditor, treeErrors, type EdGroup } from '../../utils/condition';
 import { fmtNum } from '../../utils/format';
 import type { Channel, Condition, DryRunResult, GroupMode, RuleInput, Severity } from '../../types';
+import { usePermissions } from '../../auth/permissions';
 
 interface Draft {
   name: string; teamId: number | null; priority: number; active: boolean; assignedSeverity: Severity; channels: Channel[];
@@ -48,6 +49,7 @@ export function RuleEditor() {
 }
 
 function RuleEditorInner({ onClose }: { onClose: () => void }) {
+  const { admin } = usePermissions();
   const { ruleEditor, teams, runbooks, reloadRules } = useStore();
   const toast = useToast();
   const navigate = useNavigate();
@@ -370,7 +372,7 @@ function RuleEditorInner({ onClose }: { onClose: () => void }) {
         <div className="flex flex-wrap items-center gap-2 px-6 py-3 border-t border-gray-200 bg-white rounded-b-xl">
           <div className="text-[13px] text-red-600 min-w-0 flex-1 truncate" title={saveErr}>{saveErr || (show ? condErrors[0] ?? '' : '')}</div>
           <button className="btn btn-white" onClick={onClose}>Cancel</button>
-          <button className="btn btn-dark" onClick={save} disabled={saving}>{saving && <Loader className="w-4 h-4 spin" />}{isNew ? 'Create rule' : 'Save changes'}</button>
+          {admin && <button className="btn btn-dark" onClick={save} disabled={saving}>{saving && <Loader className="w-4 h-4 spin" />}{isNew ? 'Create rule' : 'Save changes'}</button>}
         </div>
       </div>
     </Modal>
