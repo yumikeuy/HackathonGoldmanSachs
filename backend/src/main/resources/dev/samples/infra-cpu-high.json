@@ -1,0 +1,10 @@
+{
+  "metric": "cpu",
+  "value": 97.5,
+  "host": "prod-db-03",
+  "region": "eu-west-1",
+  "labels": {
+    "service": "settlement",
+    "env": "prod"
+  }
+}
