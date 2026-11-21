@@ -14,6 +14,14 @@ import { SourcesPage } from './pages/sources/SourcesPage';
 import { SimulatorPage } from './pages/simulator/SimulatorPage';
 import { FailedPage } from './pages/failed/FailedPage';
 import { AuthGate } from './auth/AuthGate';
+import { RESTRICTED_PATHS, usePermissions } from './auth/permissions';
+import type { ReactElement } from 'react';
+
+/** Pages for administrators only: anyone else is sent to the alerts. */
+function AdminOnly({ path, children }: { path: string; children: ReactElement }) {
+  const { restricted } = usePermissions();
+  return restricted && !RESTRICTED_PATHS.includes(path) ? <Navigate to="/alerts" replace /> : children;
+}
 
 export function App() {
   return (
@@ -25,13 +33,13 @@ export function App() {
             <Routes>
               <Route path="/" element={<Navigate to="/alerts" replace />} />
               <Route path="/alerts" element={<AlertsPage />} />
-              <Route path="/unrouted" element={<UnroutedPage />} />
+              <Route path="/unrouted" element={<AdminOnly path="/unrouted"><UnroutedPage /></AdminOnly>} />
               <Route path="/rules" element={<RulesPage />} />
               <Route path="/runbooks" element={<RunbooksPage />} />
-              <Route path="/recipients" element={<RecipientsPage />} />
-              <Route path="/sources" element={<SourcesPage />} />
-              <Route path="/simulator" element={<SimulatorPage />} />
-              <Route path="/failed" element={<FailedPage />} />
+              <Route path="/recipients" element={<AdminOnly path="/recipients"><RecipientsPage /></AdminOnly>} />
+              <Route path="/sources" element={<AdminOnly path="/sources"><SourcesPage /></AdminOnly>} />
+              <Route path="/simulator" element={<AdminOnly path="/simulator"><SimulatorPage /></AdminOnly>} />
+              <Route path="/failed" element={<AdminOnly path="/failed"><FailedPage /></AdminOnly>} />
               <Route path="*" element={<Navigate to="/alerts" replace />} />
             </Routes>
           </Layout>

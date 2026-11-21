@@ -9,6 +9,7 @@ import { Ago, Empty, PageWrap, SEV, SEV_RANK, Search, Sev, SevBars, Status, Spin
 import { fmtNum } from '../../utils/format';
 import { ResolveModal } from '../alert/ResolveModal';
 import type { AlertSeverity, AlertSummary } from '../../types';
+import { usePermissions } from '../../auth/permissions';
 
 const PAGE_SIZE = 15;
 type StatusFilter = 'active' | 'OPEN' | 'ACKED' | 'RESOLVED' | 'all';
@@ -25,6 +26,7 @@ export function Occ({ a }: { a: AlertSummary }) {
 export function AlertsPage() {
   const { alerts, runbooks, alertsLoaded, resolvedLoaded, loadResolved, teamName, openAlert, openAlertId, upsertAlert, fresh } = useStore();
   const toast = useToast();
+  const { operate } = usePermissions();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<StatusFilter>('active');
   const [sev, setSev] = useState<Set<AlertSeverity>>(new Set());
@@ -124,7 +126,8 @@ export function AlertsPage() {
                     <td className="td"><Occ a={a} /></td>
                     <td className="td">
                       {a.runbookId ? (
-                        <a className="btn btn-ghost btn-sm" href={api.runbookFileUrl(a.runbookId)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title="Open the runbook">
+                        <a className="btn btn-ghost btn-sm" href={api.runbookFileUrl(a.runbookId)} target="_blank" rel="noreferrer" title="Open the runbook"
+                           onClick={e => { e.stopPropagation(); e.preventDefault(); api.openRunbook(a.runbookId!).catch(err => toast({ title: 'Could not open the runbook', body: errorText(err), tone: 'err' })); }}>
                           <Paperclip className="w-3.5 h-3.5" /><span className="max-w-[120px] truncate">{runbooks.find(r => r.id === a.runbookId)?.fileName ?? 'Runbook'}</span>
                         </a>
                       ) : <span className="text-gray-300">—</span>}
@@ -132,10 +135,10 @@ export function AlertsPage() {
                     <td className="td whitespace-nowrap text-[13px] text-gray-500"><Ago t={a.lastSeenAt} /></td>
                     <td className="td pr-5">
                       <div className="flex justify-end gap-1.5" onClick={e => e.stopPropagation()}>
-                        {a.status === 'OPEN' && (
+                        {operate && a.status === 'OPEN' && (
                           <button className="btn btn-white btn-sm" disabled={acking === a.id} onClick={() => ack(a)}>{acking === a.id && <Loader className="w-3 h-3 spin" />}Ack</button>
                         )}
-                        {!resolved && <button className="btn btn-white btn-sm" onClick={() => setResolving(a)}>Resolve</button>}
+                        {operate && !resolved && <button className="btn btn-white btn-sm" onClick={() => setResolving(a)}>Resolve</button>}
                       </div>
                     </td>
                   </tr>

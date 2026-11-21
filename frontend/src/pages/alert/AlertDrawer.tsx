@@ -15,6 +15,7 @@ import { Occ } from '../feed/AlertsPage';
 import { ResolveModal } from './ResolveModal';
 import { TeamSuggestions } from './TeamSuggestions';
 import type { AlertDetail, AuditEntry, Delivery } from '../../types';
+import { usePermissions } from '../../auth/permissions';
 
 const AUDIT: Record<string, [LucideIcon, string]> = {
   ALERT_CREATED: [BellRing, 'bg-red-50 text-red-600'],
@@ -27,6 +28,7 @@ const AUDIT: Record<string, [LucideIcon, string]> = {
 export function AlertDrawer() {
   const { openAlertId, closeAlert, alerts, rules, runbooks, users, teamName, upsertAlert, onDelivery, openRuleEditor } = useStore();
   const toast = useToast();
+  const { admin, operate } = usePermissions();
   const summary = alerts.find(a => a.id === openAlertId) ?? null;
   const [detail, setDetail] = useState<AlertDetail | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
@@ -151,11 +153,11 @@ export function AlertDrawer() {
                 {a.ruleName && <span className="inline-flex items-center gap-1.5 text-[13px] text-gray-600"><Workflow className="w-3.5 h-3.5 text-gray-400" />{a.ruleName}</span>}
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button className="btn btn-white" onClick={ack} disabled={a.status !== 'OPEN' || acking}>
+                {operate && <button className="btn btn-white" onClick={ack} disabled={a.status !== 'OPEN' || acking}>
                   {acking ? <Loader className="w-4 h-4 spin" /> : <Eye className="w-4 h-4 text-amber-500" />}{a.status === 'ACKED' ? 'Acknowledged' : 'Acknowledge'}
-                </button>
-                <button className="btn btn-dark" onClick={() => setResolving(true)} disabled={a.status === 'RESOLVED'}><Check className="w-4 h-4" />Resolve</button>
-                {rule ? (
+                </button>}
+                {operate && <button className="btn btn-dark" onClick={() => setResolving(true)} disabled={a.status === 'RESOLVED'}><Check className="w-4 h-4" />Resolve</button>}
+                {!admin ? null : rule ? (
                   <button className="btn btn-ghost" onClick={() => openRuleEditor({ rule })}>Edit rule</button>
                 ) : unrouted ? (
                   <button className="btn btn-white" disabled={!detail} onClick={() => createRule()}><Plus className="w-4 h-4" />Create Rule from Event</button>

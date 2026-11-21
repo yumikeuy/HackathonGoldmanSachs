@@ -13,8 +13,10 @@ import { FileGlyph, Modal, ModalFoot, ModalHead, cx } from '../../components/ui'
 import { fmtBytes } from '../../utils/format';
 import { ruleToInput } from '../../utils/rules';
 import type { AlertSummary } from '../../types';
+import { usePermissions } from '../../auth/permissions';
 
 export function ResolveModal({ alert, onClose }: { alert: AlertSummary | null; onClose: () => void }) {
+  const { admin } = usePermissions();
   const { rules, upsertAlert, reloadRunbooks, reloadRules } = useStore();
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
@@ -66,7 +68,7 @@ export function ResolveModal({ alert, onClose }: { alert: AlertSummary | null; o
       <ModalHead title="Resolve this alert?" sub="This closes the alert and stops further grouping into it." onClose={close} />
       <div className="px-6 py-4 space-y-4">
         <div className="text-sm text-gray-600">Mark <b className="font-medium text-gray-900">{alert.title}</b> as resolved.</div>
-        <div>
+        {admin && <div>
           <label className="label">Attach a runbook <span className="text-gray-400 font-normal">(optional)</span></label>
           {file ? (
             <div className="flex items-center gap-3 rounded-xl border border-gray-200 p-3">
@@ -94,7 +96,7 @@ export function ResolveModal({ alert, onClose }: { alert: AlertSummary | null; o
               <span>Always attach it to new alerts of rule <b className="font-medium text-gray-900">{rule.name}</b></span>
             </label>
           )}
-        </div>
+        </div>}
       </div>
       <ModalFoot error={err}>
         <button className="btn btn-white" onClick={close}>Cancel</button>

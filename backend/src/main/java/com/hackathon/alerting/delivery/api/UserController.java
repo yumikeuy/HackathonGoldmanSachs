@@ -2,6 +2,7 @@ package com.hackathon.alerting.delivery.api;
 
 import com.hackathon.alerting.common.config.ConfigChangedPublisher;
 import com.hackathon.alerting.common.config.ConfigKinds;
+import com.hackathon.alerting.common.security.TeamScope;
 import com.hackathon.alerting.common.web.ConflictException;
 import com.hackathon.alerting.common.web.InvalidRequestException;
 import com.hackathon.alerting.common.web.NotFoundException;
@@ -40,6 +41,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * CRUD {@code /api/users}. Validates the time zone and the {@code HH-HH} hour windows of channel preferences;
@@ -69,7 +71,12 @@ public class UserController {
     @Transactional(readOnly = true)
     public List<UserDto> list(@RequestParam(required = false) Long teamId) {
         List<User> result = teamId == null ? users.findAll(Sort.by("id")) : users.findAllByTeamIdOrderByIdAsc(teamId);
-        return result.stream().map(UserDto::from).toList();
+        // a logged-in non-administrator sees only the users of their own team (docs/security.md, team isolation)
+        Optional<TeamScope> scope = TeamScope.current();
+        return result.stream()
+                .filter(user -> scope.map(s -> s.owns(user.getTeam().getId())).orElse(true))
+                .map(UserDto::from)
+                .toList();
     }
 
     @GetMapping("/{id}")

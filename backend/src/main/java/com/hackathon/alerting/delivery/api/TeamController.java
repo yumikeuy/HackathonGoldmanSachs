@@ -3,6 +3,7 @@ package com.hackathon.alerting.delivery.api;
 import com.hackathon.alerting.common.condition.ConditionCompiler;
 import com.hackathon.alerting.common.config.ConfigChangedPublisher;
 import com.hackathon.alerting.common.config.ConfigKinds;
+import com.hackathon.alerting.common.security.TeamScope;
 import com.hackathon.alerting.common.web.ConflictException;
 import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.delivery.model.Team;
@@ -26,6 +27,7 @@ import tools.jackson.databind.JsonNode;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * CRUD {@code /api/teams}. The condition is validated by compiling it ({@link ConditionCompiler}, 400 with the
@@ -50,7 +52,12 @@ public class TeamController {
     @GetMapping
     @Transactional(readOnly = true)
     public List<TeamDto> list() {
-        return teams.findAllByOrderByIdAsc().stream().map(TeamDto::from).toList();
+        // a logged-in non-administrator sees only their own team (docs/security.md, team isolation)
+        Optional<TeamScope> scope = TeamScope.current();
+        return teams.findAllByOrderByIdAsc().stream()
+                .filter(team -> scope.map(s -> s.owns(team.getId())).orElse(true))
+                .map(TeamDto::from)
+                .toList();
     }
 
     @GetMapping("/{id}")

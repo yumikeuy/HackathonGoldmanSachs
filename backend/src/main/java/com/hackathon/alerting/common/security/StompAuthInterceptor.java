@@ -12,11 +12,14 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Component;
 
+import java.security.Principal;
+
 /**
  * Authenticates the live feed: with login enabled a STOMP {@code CONNECT} to {@code /ws} must carry
  * {@code Authorization: Bearer <access token>} as a native STOMP header (browsers cannot set HTTP headers on a
  * WebSocket handshake). Without a valid token the connection is refused with a STOMP ERROR frame, so nobody can
- * subscribe to alerts anonymously. Any role may subscribe.
+ * subscribe to alerts anonymously. An administrator may subscribe to every topic; anyone else only to
+ * {@code /topic/alerts/{ownTeam}} (team isolation, docs/security.md); other subscriptions are silently dropped.
  */
 @Component
 public class StompAuthInterceptor implements ChannelInterceptor {
@@ -35,7 +38,14 @@ public class StompAuthInterceptor implements ChannelInterceptor {
             return message;
         }
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-        if (accessor == null || accessor.getCommand() != StompCommand.CONNECT) {
+        if (accessor == null) {
+            return message;
+        }
+        if (accessor.getCommand() == StompCommand.SUBSCRIBE) {
+            // a forbidden subscription is dropped (no data), not fatal: the connection and other subscriptions stay
+            return allowedToSubscribe(accessor) ? message : null;
+        }
+        if (accessor.getCommand() != StompCommand.CONNECT) {
             return message;
         }
         String header = accessor.getFirstNativeHeader("Authorization");
@@ -44,10 +54,28 @@ public class StompAuthInterceptor implements ChannelInterceptor {
         }
         try {
             Jwt jwt = decoder.decode(header.substring(7).trim());
-            accessor.setUser(() -> jwt.getSubject());
+            accessor.setUser(new StompUser(jwt.getSubject(), jwt.getClaimAsString("role"),
+                    jwt.getClaims().get("teamId") instanceof Number n ? n.longValue() : null));
             return message;
         } catch (JwtException e) {
             throw new MessageDeliveryException("Invalid or expired access token");
+        }
+    }
+
+    /** A non-administrator may follow only their own team's feed: {@code /topic/alerts/{ownTeam}}. */
+    private static boolean allowedToSubscribe(StompHeaderAccessor accessor) {
+        if (!(accessor.getUser() instanceof StompUser user) || "ADMIN".equals(user.role())) {
+            return true;
+        }
+        String destination = accessor.getDestination();
+        return destination != null && user.teamId() != null && destination.equals("/topic/alerts/" + user.teamId());
+    }
+
+    /** The STOMP session's user: subject, role and team from the access token. */
+    record StompUser(String subject, String role, Long teamId) implements Principal {
+        @Override
+        public String getName() {
+            return subject;
         }
     }
 }
