@@ -131,7 +131,7 @@ Always open: `POST /api/auth/login|refresh`, `POST /api/ingest/{source}` (source
 **WebSocket:** browsers cannot set headers on the handshake, so the token goes into the STOMP `CONNECT` frame as the
 native header `Authorization: Bearer …`; without it the connection is refused.
 
-**Runbook links:** a link in an email has no token, so notifications carry a **signed link**
+**Runbook links:** a link in an email has no token, so with login enforced notifications carry a **signed link**
 (`/api/runbooks/{id}/file?exp=…&sig=…`, HMAC-SHA256, 7 days, only that file). The UI gets a 5-minute one from
 `GET /api/auth/runbook-links/{id}` to open a file in a new tab; or it downloads with the bearer token.
 

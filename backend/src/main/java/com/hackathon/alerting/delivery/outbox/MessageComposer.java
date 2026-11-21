@@ -1,5 +1,6 @@
 package com.hackathon.alerting.delivery.outbox;
 
+import com.hackathon.alerting.common.security.AuthSettings;
 import com.hackathon.alerting.common.security.RunbookLinkSigner;
 import com.hackathon.alerting.delivery.model.Channel;
 import com.hackathon.alerting.delivery.model.User;
@@ -14,7 +15,8 @@ import java.time.Duration;
 /**
  * Renders the {@code delivery_outbox.payload} of a notification — the finished message for its channel, so the
  * worker only has to send it. The runbook is a link to {@code GET /api/runbooks/{id}/file}, never an attachment;
- * the link is signed and works for {@link #RUNBOOK_LINK_TTL} without logging in ({@link RunbookLinkSigner}).
+ * with login enforced the link is signed and works for {@link #RUNBOOK_LINK_TTL} without a token
+ * ({@link RunbookLinkSigner}).
  *
  * <p>Payload fields: {@code alertId}, {@code severity}, {@code title}, {@code text}, {@code runbookUrl} (if any);
  * EMAIL adds {@code to} and {@code subject}, SMS and CALL add {@code to} (the phone number).
@@ -30,10 +32,13 @@ public class MessageComposer {
 
     private final String publicUrl;
     private final RunbookLinkSigner links;
+    private final AuthSettings auth;
 
-    public MessageComposer(@Value("${alerting.public-url:http://localhost:8080}") String publicUrl, RunbookLinkSigner links) {
+    public MessageComposer(@Value("${alerting.public-url:http://localhost:8080}") String publicUrl, RunbookLinkSigner links,
+                           AuthSettings auth) {
         this.publicUrl = publicUrl.endsWith("/") ? publicUrl.substring(0, publicUrl.length() - 1) : publicUrl;
         this.links = links;
+        this.auth = auth;
     }
 
     /** The team feed row of the UI channel. */
@@ -82,6 +87,11 @@ public class MessageComposer {
     }
 
     private String runbookUrl(Alert alert) {
-        return alert.getRunbook() == null ? null : publicUrl + links.sign(alert.getRunbook().getId(), RUNBOOK_LINK_TTL).url();
+        if (alert.getRunbook() == null) {
+            return null;
+        }
+        long id = alert.getRunbook().getId();
+        // With login enforced a link in an email has no token: sign it. Otherwise the file is open anyway.
+        return publicUrl + (auth.enabled() ? links.sign(id, RUNBOOK_LINK_TTL).url() : "/api/runbooks/" + id + "/file");
     }
 }
