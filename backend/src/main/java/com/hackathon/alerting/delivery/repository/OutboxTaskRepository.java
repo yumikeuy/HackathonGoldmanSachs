@@ -1,5 +1,6 @@
 package com.hackathon.alerting.delivery.repository;
 
+import com.hackathon.alerting.delivery.model.OutboxStatus;
 import com.hackathon.alerting.delivery.model.OutboxTask;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.ScrollPosition;
@@ -32,6 +33,9 @@ public interface OutboxTaskRepository extends JpaRepository<OutboxTask, Long> {
             FOR UPDATE SKIP LOCKED
             """, nativeQuery = true)
     List<OutboxTask> lockDueBatch(Instant now, int limit);
+
+    /** Number of rows in a status ({@code alerting.delivery.pending} gauge). */
+    long countByStatus(OutboxStatus status);
 
     /** Rows of one alert, oldest first (alert card, simulator). */
     List<OutboxTask> findAllByAlertIdOrderByIdAsc(Long alertId);

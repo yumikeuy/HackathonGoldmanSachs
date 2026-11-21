@@ -3,6 +3,7 @@ package com.hackathon.alerting.rules.repository;
 import com.hackathon.alerting.rules.model.Alert;
 import com.hackathon.alerting.rules.model.AlertStatus;
 import org.springframework.data.domain.Limit;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.domain.Window;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -66,6 +67,13 @@ public interface AlertRepository extends JpaRepository<Alert, Long>, AlertJdbcOp
     /** One alert with rule and runbook fetched, for the alert card. */
     @EntityGraph(attributePaths = {"rule", "runbook"})
     Optional<Alert> findDetailedById(Long id);
+
+    /**
+     * Source names of the events stored for an alert (only UNROUTED alerts have such rows), oldest first.
+     * Reads table {@code events} (Role 1) read-only; used to look up an unrouted alert's source.
+     */
+    @Query("select e.sourceName from Event e where e.alert.id = :alertId order by e.ingestedAt asc")
+    List<String> findEventSourceNames(Long alertId, Pageable page);
 
     /** Whether any alert (in any status) references the rule — such a rule cannot be deleted. */
     boolean existsByRuleId(Long ruleId);

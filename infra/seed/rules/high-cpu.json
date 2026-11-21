@@ -1,0 +1,8 @@
+{"teamId": __TEAM_ID__, "name": "High CPU",
+ "condition": {"and": [
+   {"path": "metric", "op": "==", "value": "cpu"},
+   {"path": "value", "op": ">", "value": 90}
+ ]},
+ "assignedSeverity": "HIGH", "channels": ["EMAIL", "UI"],
+ "groupByPaths": ["host"], "groupMode": "per_window", "dedupWindowSec": 300,
+ "presentation": {"title": "CPU {{value}}% on {{host}}"}}

@@ -9,8 +9,11 @@ import com.hackathon.alerting.rules.cache.RuleRoute;
 import com.hackathon.alerting.rules.cache.TeamRoute;
 import com.hackathon.alerting.rules.dedup.DedupStore;
 import com.hackathon.alerting.rules.dedup.FingerprintCalculator;
+import com.hackathon.alerting.rules.metrics.ProcessingMetrics;
+import com.hackathon.alerting.rules.metrics.ProcessingMetrics.Outcome;
 import com.hackathon.alerting.rules.push.AlertPublisher;
 import com.hackathon.alerting.rules.repository.AlertRepository;
+import com.hackathon.alerting.rules.unrouted.SourceHistory;
 import com.hackathon.alerting.rules.unrouted.UnroutedEventHandler;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -28,7 +31,8 @@ import java.util.Optional;
  *       the others are counted as repeats.</li>
  * </ol>
  * A team that matches but has no matching rule produces nothing — the event belongs to the team, which
- * chose not to alert on it.
+ * chose not to alert on it. Every routed event is also counted in {@link SourceHistory} (which teams a source's
+ * events go to), the history behind team suggestions for unrouted alerts.
  */
 @Component
 public class EventRouter {
@@ -41,10 +45,12 @@ public class EventRouter {
     private final AlertRepository alerts;
     private final AlertPublisher publisher;
     private final UnroutedEventHandler unrouted;
+    private final SourceHistory sourceHistory;
+    private final ProcessingMetrics metrics;
 
     public EventRouter(RoutingCache routing, FingerprintCalculator fingerprints, DedupStore dedup, AlertCreator creator,
                        AlertService alertService, AlertRepository alerts, AlertPublisher publisher,
-                       UnroutedEventHandler unrouted) {
+                       UnroutedEventHandler unrouted, SourceHistory sourceHistory, ProcessingMetrics metrics) {
         this.routing = routing;
         this.fingerprints = fingerprints;
         this.dedup = dedup;
@@ -53,6 +59,8 @@ public class EventRouter {
         this.alerts = alerts;
         this.publisher = publisher;
         this.unrouted = unrouted;
+        this.sourceHistory = sourceHistory;
+        this.metrics = metrics;
     }
 
     public void route(EventEnvelope envelope) {
@@ -60,8 +68,11 @@ public class EventRouter {
         List<TeamRoute> teams = routing.current().teamsMatching(event);
         if (teams.isEmpty()) {
             unrouted.handle(envelope);
+            metrics.eventProcessed(Outcome.UNROUTED);
             return;
         }
+        sourceHistory.record(envelope.sourceName(), teams);
+        metrics.eventProcessed(Outcome.ROUTED);
         for (TeamRoute team : teams) {
             for (RuleRoute rule : team.rules()) {
                 if (rule.resolves(event)) {
@@ -79,6 +90,7 @@ public class EventRouter {
         int window = rule.rule().getDedupWindowSec();
         if (!dedup.tryClaim(fingerprint, window)) {
             dedup.countRepeat(fingerprint, window);
+            metrics.repeat();
             return;
         }
         Optional<AlertSummary> created;
@@ -90,6 +102,7 @@ public class EventRouter {
         }
         if (created.isPresent()) {
             dedup.bindAlert(fingerprint, created.get().id());
+            metrics.alertCreated(created.get().severity());
             publisher.publish(created.get());
             return;
         }
@@ -98,6 +111,7 @@ public class EventRouter {
                 open -> {
                     dedup.bindAlert(fingerprint, open.getId());
                     dedup.countRepeat(fingerprint, window);
+                    metrics.repeat();
                 },
                 () -> dedup.releaseClaim(fingerprint));
     }
