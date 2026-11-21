@@ -12,7 +12,7 @@ the payload is stored as is (`raw_payload`), nothing is parsed against a schema.
 |---|---|---|
 | `http` | `{}` | `POST /api/ingest/{name}` with any JSON body |
 | `kafka` | `{"topic": "workflow.events"}` | the service consumes the external topic (group `alerting-source-{name}`) |
-| `file` | `{"path": "/data/logs/app.log"}` | the service tails the file (path inside the backend container) |
+| `file` | `{"path": "/data/logs/app.log", "pattern": "…"}` | the service tails the file (path inside the backend container); `pattern` optional |
 
 Creating, changing or deactivating a source takes effect on all instances within a second (Redis `config.changed`),
 no restart. Validation: a `kafka` source needs `config.topic`, a `file` source `config.path`; names are unique (409).
@@ -47,10 +47,19 @@ One tailer per active `file` source (`ingest.source.FileTailSources` / `FileTail
 - only complete lines are ingested; a half-written last line waits;
 - **rotation** (path now points to a new file): the old file is read to its end first, then the new one from the start;
   **truncation** (file shrank): reading restarts at the beginning;
-- a line that is a JSON object/array is ingested as is, any other line as `{"message": "<line>"}`;
+- a line that is a JSON object/array is ingested as is;
+- with `config.pattern` — a Java regex with **named groups** — a matching line becomes its groups plus `message`
+  (the whole line), so conditions can use the fields:
+  `(?<ts>\S+) (?<level>[A-Z]+) (?<service>[\w-]+): (?<text>.*)` turns
+  `2026-11-21T10:00:00Z ERROR pricing-engine: curve load timed out` into
+  `{"ts": "…", "level": "ERROR", "service": "pricing-engine", "text": "curve load timed out", "message": "…"}`.
+  An invalid pattern or one without named groups is rejected on save (400);
+- any other line becomes `{"message": "<line>"}`;
 - Kafka down → the **same** line is retried on the next poll; lines are never skipped.
 
 In docker-compose `./infra/logs` is mounted at `/data/logs`; the seeded source `app-log` tails `infra/logs/app.log`.
+With several instances only one tails a file (Redis lease) and the read position is saved, so a failover continues
+where it stopped ([operations.md](operations.md#several-instances)).
 
 ## Internal Kafka topics
 
@@ -141,7 +150,7 @@ Hourly cleanup deletes SENT rows older than one day.
 | WebSocket `/topic/simulator` | every attempt, live |
 
 While a channel is down its deliveries fail and are retried; switch it back on within the retry schedule (~80 s) and
-every message is delivered — none lost. Switches are per instance and reset on restart.
+every message is delivered — none lost. Switches are stored in Redis, so they apply to every instance.
 
 ## Metrics
 
@@ -153,5 +162,6 @@ every message is delivered — none lost. Switches are per instance and reset on
 | `alerting.delivery.retried` | `channel` | failed attempts scheduled for retry |
 | `alerting.delivery.failed` | `channel` | notifications given up after all retries |
 | `alerting.delivery.pending` | — | gauge: PENDING outbox rows |
+| `alerting.delivery.latency` | `channel` | timer, end to end: from the alert's first event (ingest time) to the notification being sent; p50 / p95 / p99 and a histogram |
 
 Exposed at `/actuator/prometheus` (names with `_` and `_total`).

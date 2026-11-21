@@ -8,6 +8,7 @@ import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.ingest.model.Source;
 import com.hackathon.alerting.ingest.model.SourceType;
 import com.hackathon.alerting.ingest.repository.SourceRepository;
+import com.hackathon.alerting.ingest.source.LogLineFormat;
 import com.hackathon.alerting.ingest.source.SourceKeys;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -168,6 +169,9 @@ public class SourceController {
             if (path == null || !path.isString() || path.asString().isBlank()) {
                 throw new InvalidRequestException("A file source needs config.path");
             }
+            LogLineFormat.validate(input.config()).ifPresent(error -> {
+                throw new InvalidRequestException(error);
+            });
         }
     }
 

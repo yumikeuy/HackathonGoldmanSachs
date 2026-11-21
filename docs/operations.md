@@ -37,7 +37,7 @@ overrides the hosts with environment variables.
 | — | `alerting.ingest.send-timeout` | `5s` | how long ingest waits for Kafka before 503 |
 | — | `alerting.outbox.poll-interval` | `500ms` | outbox worker period |
 | — | `alerting.outbox.cleanup-cron` | hourly | deletion of SENT rows older than a day |
-| — | `alerting.file-source.poll-interval` | `500ms` | how often file sources are checked |
+| — | `alerting.file-source.poll-interval` | `500ms` | how often file sources are checked (and their lease renewed) |
 | — | `alerting.mail.from` | `alerts@alerting.local` | sender of emails |
 | `INGEST_RATE_LIMIT` | `alerting.ingest.rate-limit-per-second` | 1000 | events/s per HTTP source (429 above; 0 disables) |
 | `ALLOWED_ORIGINS` | `alerting.security.allowed-origins` | `http://localhost:*,http://127.0.0.1:*` | browser origins allowed cross-origin (CORS, WebSocket) |
@@ -89,13 +89,57 @@ tests: `IngestIntegrationTest` (HTTP, Kafka and file sources → `events.ingest`
 (rotation, truncation, retry of a refused line) and `ApiContractTest` — the implemented REST operations equal the
 contract `frontend/openapi.yaml` (operations marked `x-planned: true` must not be implemented yet).
 
-Build without local Java:
+Build without local Java — run from the **repository root** (the whole repo is mounted: `ApiContractTest` reads
+`../frontend/openapi.yaml`):
 
 ```bash
-cd backend && docker run --rm --network host -v /var/run/docker.sock:/var/run/docker.sock \
-  -e TESTCONTAINERS_HOST_OVERRIDE=localhost -v m2cache:/root/.m2 -v "$PWD":/app -w /app \
+# Linux
+docker run --rm --network host -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TESTCONTAINERS_HOST_OVERRIDE=localhost -v m2cache:/root/.m2 -v "$PWD":/repo -w /repo/backend \
+  maven:3.9-eclipse-temurin-21 mvn -B test
+
+# Docker Desktop (macOS, Windows): no host network — containers are reached through host.docker.internal
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -v m2cache:/root/.m2 -v "$PWD":/repo -w /repo/backend \
   maven:3.9-eclipse-temurin-21 mvn -B test
 ```
+
+## CI
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`:
+
+| Job | What |
+|---|---|
+| `mvn test` | all unit and Testcontainers tests; surefire reports are uploaded on failure |
+| `compose → seed → smoke` | builds the image, starts the stack, runs `infra/seed/seed.sh` and `infra/smoke.sh` twice; backend logs on failure |
+
+## Several instances
+
+The service is stateless between requests; everything shared lives in Postgres, Kafka or Redis, so instances can be
+added behind a load balancer:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up --build -d --scale backend=2
+infra/seed/seed.sh && infra/scale-demo.sh && infra/smoke.sh
+```
+
+`docker-compose.scale.yml` puts nginx (`infra/nginx/nginx.conf`, round robin, WebSocket upgrade, `X-Upstream`
+header) on port 8080 in front of the replicas. `infra/scale-demo.sh` sends 200 identical events through it in
+parallel and checks that they were spread over the instances, became **one** alert with `occurrencesCount = 200` and
+that every notification was sent **once**.
+
+| Concern | How instances cooperate |
+|---|---|
+| Event processing | one Kafka consumer group: the 6 partitions of `events.ingest` are split between instances |
+| Deduplication | Redis `dedup:{fp}` + the unique index on open alerts (Role 2) |
+| Delivery | `FOR UPDATE SKIP LOCKED` on `delivery_outbox`: a row is sent by exactly one worker |
+| Config caches | Redis Pub/Sub `config.changed` reloads every instance |
+| Live UI feed | Redis Pub/Sub `ws.fanout`: a push on one instance reaches browsers connected to any instance |
+| Simulator switches | Redis hash `sim:channels` |
+| File sources | Redis lease `lock:file-source:{name}` — one instance tails a file; position `file-pos:{name}` survives failover (stop the tailing instance: another takes over within 10 s and continues at the saved offset) |
+| Rate limits, login | Redis counters and refresh tokens |
+
+
 
 ## Metrics and health
 

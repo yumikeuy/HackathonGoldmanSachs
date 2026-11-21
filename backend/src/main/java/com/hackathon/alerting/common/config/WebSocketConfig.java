@@ -26,11 +26,13 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final String[] allowedOrigins;
     private final StompAuthInterceptor stompAuth;
+    private final WebSocketFanout fanout;
 
     public WebSocketConfig(@Value("${alerting.security.allowed-origins}") String[] allowedOrigins,
-                           StompAuthInterceptor stompAuth) {
+                           StompAuthInterceptor stompAuth, WebSocketFanout fanout) {
         this.allowedOrigins = allowedOrigins;
         this.stompAuth = stompAuth;
+        this.fanout = fanout;
     }
 
     /** With login enabled, CONNECT needs an access token ({@link StompAuthInterceptor}). */
@@ -47,6 +49,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         registry.enableSimpleBroker(WebSocketTopics.PREFIX);
+        // Broadcasts reach subscribers on every instance (WebSocketFanout, Redis Pub/Sub)
+        registry.configureBrokerChannel().interceptors(fanout);
         registry.setApplicationDestinationPrefixes("/app");
     }
 }

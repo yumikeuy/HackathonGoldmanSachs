@@ -105,7 +105,10 @@ Log files (sources)     ───┘                                            
                                                                           └─▶ WebSocket push to the UI
 ```
 
-One Spring Boot application (modular monolith) plus Postgres, Kafka, Redis and MailHog.
+One Spring Boot application (modular monolith) plus Postgres, Kafka, Redis and MailHog. It scales out: several
+instances behind a load balancer share work through Kafka, Postgres and Redis — `docker-compose.scale.yml` and
+`infra/scale-demo.sh` show two instances producing one deduplicated alert and one notification per recipient
+([operations](docs/operations.md#several-instances)). CI: `.github/workflows/ci.yml` (tests + compose → seed → smoke).
 
 ## Repository layout
 

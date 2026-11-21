@@ -15,6 +15,7 @@ class SafeFileDownloadAdviceTest {
         assertThat(inline("text/plain", "1. Restart the workflow\n2. Check the curve")).isTrue();
         assertThat(inline("text/markdown", "# Trade rejected\n- call the desk")).isTrue();
         assertThat(inline("image/png", "\u0089PNG")).isTrue();
+        assertThat(inline("application/yaml", "steps:\n  - restart: workflow")).isTrue();
     }
 
     @Test
@@ -32,6 +33,7 @@ class SafeFileDownloadAdviceTest {
         assertThat(inline("text/plain", "  <!DOCTYPE html><script>alert(1)</script>")).isFalse();
         assertThat(inline("text/plain", "﻿<script>steal()</script>")).isFalse();
         assertThat(inline("text/markdown", "<svg/onload=alert(1)>")).isFalse();
+        assertThat(inline("application/yaml", "<html><script>alert(1)</script>")).isFalse();
         assertThat(inline("text/plain", "use <b>bold</b> in the ticket")).isTrue();
     }
 
