@@ -43,4 +43,4 @@ export function canEditRunbook(p: Permissions, runbook: { teamId?: number | null
 }
 
 /** Pages a restricted user may open; the rest are for administrators. */
-export const RESTRICTED_PATHS = ['/alerts', '/rules', '/runbooks'];
+export const RESTRICTED_PATHS = ['/alerts', '/rules', '/runbooks', '/help'];

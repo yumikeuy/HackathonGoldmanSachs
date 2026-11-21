@@ -1,7 +1,7 @@
 /** App shell: dark sidebar + white workspace header with the signed-in user (prototype layout; team selector removed). */
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Bell, BellRing, BookOpen, CircleX, LogOut, Menu, Pause, Radio, Split, TriangleAlert, Users, Workflow, Zap, type LucideIcon } from 'lucide-react';
+import { Bell, BellRing, BookOpen, CircleHelp, CircleX, LogOut, Menu, Pause, Radio, Split, TriangleAlert, Users, Workflow, Zap, type LucideIcon } from 'lucide-react';
 import { session } from '../auth/session';
 import { RESTRICTED_PATHS, usePermissions } from '../auth/permissions';
 import { useStore } from '../state/store';
@@ -18,6 +18,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/sources', label: 'Sources', icon: Radio },
   { path: '/simulator', label: 'Simulator', icon: Zap },
   { path: '/failed', label: 'Failed Events', icon: CircleX },
+  { path: '/help', label: 'Help', icon: CircleHelp },
 ];
 
 function LiveIndicator() {
