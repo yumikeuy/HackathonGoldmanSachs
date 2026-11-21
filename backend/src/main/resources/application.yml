@@ -17,6 +17,11 @@ spring:
       ddl-auto: none
     properties:
       hibernate.jdbc.batch_size: 100
+      hibernate.order_inserts: true
+      hibernate.order_updates: true
+      # Serialize JSONB columns with Jackson 3 (tools.jackson). Without this Hibernate prefers Jackson 2
+      # whenever it is on the classpath transitively (e.g. in tests via kafka-server).
+      hibernate.type.json_format_mapper: jackson3
   flyway:
     locations: classpath:db/migration
   data:

@@ -144,6 +144,23 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <!--
+              Build-time bytecode enhancement of entities. Required for @Basic(fetch = LAZY) to take effect:
+              runbooks.content (BYTEA up to 10 MB) is loaded only when it is actually accessed.
+              Version matches hibernate-core from the Spring Boot BOM.
+            -->
+            <plugin>
+                <groupId>org.hibernate.orm</groupId>
+                <artifactId>hibernate-maven-plugin</artifactId>
+                <version>${hibernate.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>enhance</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>
