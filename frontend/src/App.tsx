@@ -14,6 +14,7 @@ import { RecipientsPage } from './pages/recipients/RecipientsPage';
 import { SourcesPage } from './pages/sources/SourcesPage';
 import { SimulatorPage } from './pages/simulator/SimulatorPage';
 import { FailedPage } from './pages/failed/FailedPage';
+import { HelpPage } from './pages/help/HelpPage';
 import { AuthGate } from './auth/AuthGate';
 import { RESTRICTED_PATHS, usePermissions } from './auth/permissions';
 import type { ReactElement } from 'react';
@@ -41,6 +42,7 @@ export function App() {
               <Route path="/sources" element={<AdminOnly path="/sources"><SourcesPage /></AdminOnly>} />
               <Route path="/simulator" element={<AdminOnly path="/simulator"><SimulatorPage /></AdminOnly>} />
               <Route path="/failed" element={<AdminOnly path="/failed"><FailedPage /></AdminOnly>} />
+              <Route path="/help" element={<HelpPage />} />
               <Route path="*" element={<Navigate to="/alerts" replace />} />
             </Routes>
           </Layout>
