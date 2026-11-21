@@ -1,8 +1,11 @@
 /**
  * Thin fetch wrapper for the backend REST API (`frontend/openapi.yaml`).
  * Errors are RFC 9457 problem+json; `ApiError.detail` is human-readable and safe to show.
+ * When logged in, every request carries the access token; a 401 triggers one token refresh and one retry,
+ * and if that fails the session ends (the login screen shows).
  */
 import type { Problem } from '../types';
+import { session } from '../auth/session';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -21,7 +24,7 @@ export class ApiError extends Error {
 function statusText(status: number): string {
   switch (status) {
     case 0: return 'The server cannot be reached. Is the backend running?';
-    case 401: return 'This server requires login (JWT_ENABLED=true). The UI runs without login.';
+    case 401: return 'Your session has expired — please log in again.';
     case 403: return 'You are not allowed to do this.';
     case 404: return 'Not found — it may have been deleted.';
     case 409: return 'This conflicts with existing data.';
@@ -64,20 +67,31 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+function authHeaders(): Record<string, string> {
+  return session.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {};
+}
+
 export async function request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json, application/problem+json' };
   let body: BodyInit | undefined;
+  const base: Record<string, string> = { Accept: 'application/json, application/problem+json' };
   if (opts.form) body = opts.form;
   else if (opts.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
+    base['Content-Type'] = 'application/json';
     body = JSON.stringify(opts.body);
   }
-  let res: Response;
-  try {
-    res = await fetch(withQuery(path, opts.query), { method, headers, body, signal: opts.signal });
-  } catch (e) {
-    if ((e as Error).name === 'AbortError') throw e;
-    throw new ApiError(0, statusText(0));
+  const send = async (): Promise<Response> => {
+    try {
+      return await fetch(withQuery(path, opts.query), { method, headers: { ...base, ...authHeaders() }, body, signal: opts.signal });
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') throw e;
+      throw new ApiError(0, statusText(0));
+    }
+  };
+  let res = await send();
+  if (res.status === 401 && session.loggedIn) {
+    // access token expired: refresh once, retry once; a failed refresh ends the session
+    if (await session.refresh()) res = await send();
+    else session.expire();
   }
   if (!res.ok) throw await toError(res);
   if (res.status === 204) return undefined as T;
@@ -97,11 +111,23 @@ export const http = {
  * A too-large body makes Tomcat answer 413 and close the connection, so the browser may only see a network
  * error — callers check the size first (≤ 10 MB) and this maps a failed upload to a readable message.
  */
-export function upload<T>(method: 'POST' | 'PUT', path: string, form: FormData, onProgress?: (pct: number) => void): Promise<T> {
+export async function upload<T>(method: 'POST' | 'PUT', path: string, form: FormData, onProgress?: (pct: number) => void): Promise<T> {
+  try {
+    return await uploadOnce<T>(method, path, form, onProgress);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401 && session.loggedIn && await session.refresh()) {
+      return uploadOnce<T>(method, path, form, onProgress);
+    }
+    throw e;
+  }
+}
+
+function uploadOnce<T>(method: 'POST' | 'PUT', path: string, form: FormData, onProgress?: (pct: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open(method, path);
     xhr.setRequestHeader('Accept', 'application/json, application/problem+json');
+    Object.entries(authHeaders()).forEach(([k, v]) => xhr.setRequestHeader(k, v));
     xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
     xhr.onload = () => {
       let parsed: unknown = undefined;

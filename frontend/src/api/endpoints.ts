@@ -1,4 +1,5 @@
 /** One function per operation of `frontend/openapi.yaml`. */
+import { session } from '../auth/session';
 import { http, request, upload } from './client';
 import type {
   AlertDetail, AlertPage, AlertStatus, AuditEntry, ChannelState, Channel, Condition, DeliveryPage, DryRunRequest,
@@ -55,8 +56,10 @@ export const getAlerts = (q: AlertQuery) =>
     teamId: q.teamId, unrouted: q.unrouted ? true : undefined, status: q.status, cursor: q.cursor, limit: q.limit ?? 200,
   });
 export const getAlert = (id: number) => http.get<AlertDetail>(`/api/alerts/${id}`);
-export const ackAlert = (id: number, actor = 'ui') => http.post<AlertDetail>(`/api/alerts/${id}/ack`, { actor });
-export const resolveAlert = (id: number, actor = 'ui') => http.post<AlertDetail>(`/api/alerts/${id}/resolve`, { actor });
+/** Who acts in the audit trail: the logged-in user's email, or "ui" without login. */
+const currentActor = () => session.user?.email ?? 'ui';
+export const ackAlert = (id: number, actor = currentActor()) => http.post<AlertDetail>(`/api/alerts/${id}/ack`, { actor });
+export const resolveAlert = (id: number, actor = currentActor()) => http.post<AlertDetail>(`/api/alerts/${id}/resolve`, { actor });
 export const getAudit = (id: number) => http.get<AuditEntry[]>(`/api/alerts/${id}/audit`);
 export const getTeamSuggestions = (id: number) => http.get<TeamSuggestion[]>(`/api/alerts/${id}/team-suggestions`);
 
@@ -64,6 +67,27 @@ export const getTeamSuggestions = (id: number) => http.get<TeamSuggestion[]>(`/a
 export const getRunbooks = (teamId?: number) => http.get<Runbook[]>('/api/runbooks', { teamId });
 export const deleteRunbook = (id: number) => http.del(`/api/runbooks/${id}`);
 export const runbookFileUrl = (id: number) => `/api/runbooks/${id}/file`;
+
+/**
+ * Opens a runbook file in a new tab. A plain link carries no token, so when logged in the tab gets a short-lived
+ * signed link (`GET /api/auth/runbook-links/{id}`). The tab is opened synchronously (popup blockers) and pointed at
+ * the file once the link is known.
+ */
+export async function openRunbook(id: number): Promise<void> {
+  if (!session.loggedIn) {
+    window.open(runbookFileUrl(id), '_blank', 'noopener');
+    return;
+  }
+  const tab = window.open('', '_blank');
+  try {
+    const link = await http.get<{ url: string }>(`/api/auth/runbook-links/${id}`);
+    if (tab) tab.location.href = link.url;
+    else window.open(link.url, '_blank', 'noopener');
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
+}
 
 export interface RunbookForm { file?: File | null; teamId?: number | null; condition?: Condition | null }
 function runbookFormData(f: RunbookForm): FormData {

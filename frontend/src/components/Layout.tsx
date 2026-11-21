@@ -1,7 +1,8 @@
-/** App shell: dark sidebar + white workspace header (prototype layout; team selector and admin login removed). */
-import { useEffect, useState, type ReactNode } from 'react';
+/** App shell: dark sidebar + white workspace header with the signed-in user (prototype layout; team selector removed). */
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Bell, BellRing, BookOpen, CircleX, Menu, Pause, Radio, Split, TriangleAlert, Users, Workflow, Zap, type LucideIcon } from 'lucide-react';
+import { Bell, BellRing, BookOpen, CircleX, LogOut, Menu, Pause, Radio, Split, TriangleAlert, Users, Workflow, Zap, type LucideIcon } from 'lucide-react';
+import { session } from '../auth/session';
 import { useStore } from '../state/store';
 import { cx } from './ui';
 
@@ -29,6 +30,25 @@ function LiveIndicator() {
     <button onClick={togglePaused} title="Pause or resume live updates" className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[13px] text-gray-500 hover:bg-gray-100">
       {dot}{label}
     </button>
+  );
+}
+
+const ROLE_LABEL = { VIEWER: 'Viewer', OPERATOR: 'Operator', ADMIN: 'Admin' } as const;
+
+/** Signed-in user and sign-out; nothing when the server does not require login and nobody signed in. */
+function UserMenu() {
+  const user = useSyncExternalStore(l => session.subscribe(l), () => session.user);
+  if (!user) return null;
+  return (
+    <div className="ml-auto flex items-center gap-2 min-w-0">
+      <div className="text-right min-w-0 hidden sm:block">
+        <div className="text-[13px] font-medium text-gray-900 truncate">{user.name}</div>
+        <div className="text-[11px] text-gray-500 truncate">{ROLE_LABEL[user.role]} · {user.email}</div>
+      </div>
+      <button className="btn btn-ghost btn-icon" title="Sign out" aria-label="Sign out" onClick={() => void session.logout()}>
+        <LogOut className="w-4 h-4" />
+      </button>
+    </div>
   );
 }
 
@@ -87,6 +107,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <button className="btn btn-ghost btn-icon md:hidden" onClick={() => setNavOpen(true)} aria-label="Open navigation"><Menu className="w-5 h-5" /></button>
           <h1 className="text-xl font-semibold tracking-tight text-gray-900 truncate">{current.label}</h1>
           <LiveIndicator />
+          <UserMenu />
         </header>
         {paused && (
           <div className="bg-amber-50 border-b border-amber-200 px-4 md:px-8 py-2 text-[13px] text-amber-800 flex items-center gap-2">

@@ -13,11 +13,13 @@ import { RecipientsPage } from './pages/recipients/RecipientsPage';
 import { SourcesPage } from './pages/sources/SourcesPage';
 import { SimulatorPage } from './pages/simulator/SimulatorPage';
 import { FailedPage } from './pages/failed/FailedPage';
+import { AuthGate } from './auth/AuthGate';
 
 export function App() {
   return (
     <HashRouter>
       <ToastProvider>
+        <AuthGate>
         <StoreProvider>
           <Layout>
             <Routes>
@@ -36,6 +38,7 @@ export function App() {
           <AlertDrawer />
           <RuleEditor />
         </StoreProvider>
+        </AuthGate>
       </ToastProvider>
     </HashRouter>
   );

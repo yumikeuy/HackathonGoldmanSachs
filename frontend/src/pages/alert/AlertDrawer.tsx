@@ -187,7 +187,8 @@ export function AlertDrawer() {
                       <div className="text-sm font-medium text-gray-900 truncate">{rbName ?? `Runbook #${rbId}`}</div>
                       <div className="text-[13px] text-gray-500">{rb ? (rb.teamId ? teamName(rb.teamId) : 'Global') : 'Attached runbook'}</div>
                     </div>
-                    <a className="ml-auto btn btn-dark" href={detail?.runbook?.fileUrl ?? api.runbookFileUrl(rbId)} target="_blank" rel="noreferrer"><Download className="w-4 h-4" />Open</a>
+                    <a className="ml-auto btn btn-dark" href={detail?.runbook?.fileUrl ?? api.runbookFileUrl(rbId)} target="_blank" rel="noreferrer"
+                       onClick={e => { e.preventDefault(); api.openRunbook(rbId).catch(err => toast({ title: 'Could not open the runbook', body: errorText(err), tone: 'err' })); }}><Download className="w-4 h-4" />Open</a>
                   </div>
                 ) : (
                   <div className="rounded-xl border border-dashed border-gray-300 p-3 text-[13px] text-gray-500">

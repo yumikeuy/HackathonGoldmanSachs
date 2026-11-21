@@ -4,8 +4,11 @@
  *   /topic/unrouted        — AlertSummary of UNROUTED alerts (Role 2)
  *   /topic/simulator       — Delivery, every delivery attempt (Role 1)
  * Subscriptions are kept in a registry and re-created after every reconnect.
+ * When logged in, CONNECT carries `Authorization: Bearer …` (read fresh on every (re)connect); a login or logout
+ * reconnects with the new identity.
  */
 import { Client, type StompSubscription } from '@stomp/stompjs';
+import { session } from '../auth/session';
 
 export type LiveStatus = 'connecting' | 'live' | 'down';
 type Handler = (body: unknown) => void;
@@ -17,6 +20,7 @@ class LiveClient {
   private entries = new Set<Entry>();
   private statusListeners = new Set<(s: LiveStatus) => void>();
   private _status: LiveStatus = 'connecting';
+  private connectFailed = false;
 
   get status() { return this._status; }
 
@@ -39,6 +43,13 @@ class LiveClient {
       reconnectDelay: 3000,
       heartbeatIncoming: 10000,
       heartbeatOutgoing: 10000,
+      beforeConnect: async () => {
+        if (!this.client) return;
+        // an expired access token would make CONNECT fail; refresh first when logged in
+        if (session.loggedIn && this.connectFailed) await session.refresh();
+        this.client.connectHeaders = session.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {};
+        this.connectFailed = false;
+      },
       onConnect: () => {
         this.entries.forEach(e => this.attach(e));
         this.setStatus('live');
@@ -47,9 +58,20 @@ class LiveClient {
         this.entries.forEach(e => { e.sub = null; });
         this.setStatus(this._status === 'live' ? 'connecting' : 'down');
       },
-      onStompError: () => this.setStatus('down'),
+      onStompError: () => {
+        this.connectFailed = true;
+        this.setStatus('down');
+      },
     });
     this.client.activate();
+  }
+
+  /** Reconnect, e.g. after login or logout, so the server sees the current identity. */
+  restart() {
+    const old = this.client;
+    this.client = null;
+    if (old) void old.deactivate();
+    this.start();
   }
 
   private attach(e: Entry) {

@@ -203,7 +203,8 @@ export function RunbooksPage() {
                   </td>
                   <td className="td pr-5">
                     <div className="flex justify-end gap-1">
-                      <a className="btn btn-white btn-sm" href={rb.fileUrl} target="_blank" rel="noreferrer"><Download className="w-3.5 h-3.5" />Open</a>
+                      <a className="btn btn-white btn-sm" href={rb.fileUrl} target="_blank" rel="noreferrer"
+                         onClick={e => { e.preventDefault(); api.openRunbook(rb.id).catch(err => toast({ title: 'Could not open the runbook', body: errorText(err), tone: 'err' })); }}><Download className="w-3.5 h-3.5" />Open</a>
                       <button className="btn btn-ghost btn-sm w-7 px-0" title="Edit" onClick={() => stageEdit(rb)}><Pencil className="w-3.5 h-3.5" /></button>
                       <button className="btn btn-ghost btn-sm w-7 px-0 hover:!text-red-600" title="Delete" onClick={() => setDeleting(rb)}><Trash2 className="w-3.5 h-3.5" /></button>
                     </div>
