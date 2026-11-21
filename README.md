@@ -14,6 +14,7 @@ Needs Docker only.
 docker compose up --build -d     # Postgres, Kafka, Redis, MailHog and the service (with the UI when frontend/ is built)
 infra/seed/seed.sh               # demo sources, teams, users, rules and runbooks (idempotent)
 infra/smoke.sh                   # end-to-end check: events → alerts → email; exits non-zero on failure
+infra/demo-traffic.sh            # live demo: a narrated stream of events through HTTP, Kafka and a log file
 ```
 
 | What | Where |

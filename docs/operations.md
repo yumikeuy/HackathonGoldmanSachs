@@ -81,6 +81,23 @@ skipped — a second run reports `0 created`. To change seeded data, edit it in 
 Exit code 0 = passed; prints the failing step otherwise. Safe to run repeatedly (it resolves the log alerts of
 earlier runs first). `BASE_URL`, `MAILHOG_URL`, `TIMEOUT` (seconds per wait, default 30) can be overridden.
 
+## Live demo traffic
+
+`infra/demo-traffic.sh` sends a narrated story of events at a human pace (default one every 2 s, `PAUSE=`) through
+all three source types, so the audience watches alerts appear in the UI without a reload and land in the right team:
+
+| Act | Source | Lands in |
+|---|---|---|
+| rejected trades on several instruments | HTTP `payments-monitoring` | Team Rates, HIGH, one alert per instrument |
+| a failed workflow, twice | Kafka `workflow.events` | Team Pricing, CRITICAL, one alert ×2 |
+| CPU 9x % / CPU 42 % | HTTP `legacy-gateway` | Team Infra, HIGH / routed but no rule fires — no alert |
+| `ERROR` / `INFO` log lines | file `infra/logs/app.log` | Team Infra, MEDIUM / UNROUTED |
+| an unknown event shape | HTTP `legacy-gateway` | UNROUTED |
+| 30 identical rejected trades at once | HTTP | the same Team Rates alert, count +30 |
+| the workflow recovers (`status: OK`) | Kafka | the Pricing alert resolves itself |
+
+`--loop` repeats with varying values until Ctrl+C — a background feed while presenting.
+
 ## Tests
 
 `cd backend && mvn test` — unit tests plus Testcontainers integration tests (Docker must be running). Notable Role 1
