@@ -1,3 +1,4 @@
 {"teamId": __TEAM_ID__, "name": "John Smith", "email": "john.smith@bank.example", "phone": "+44 7700 100004",
  "timezone": "Europe/London",
- "channelPreferences": [{"channel": "EMAIL", "hours": "00-24"}, {"channel": "SMS"}]}
+ "channelPreferences": [{"channel": "EMAIL", "hours": "00-24"}, {"channel": "SMS"}],
+ "role": "ADMIN", "password": "demo-password"}

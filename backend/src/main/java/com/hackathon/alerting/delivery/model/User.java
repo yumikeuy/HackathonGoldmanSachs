@@ -2,6 +2,8 @@ package com.hackathon.alerting.delivery.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -65,6 +67,14 @@ public class User {
 
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
+
+    /** BCrypt hash of the UI password; {@code null} — the user cannot log in. Never leaves the service layer. */
+    @Column(name = "password_hash", length = 100)
+    private String passwordHash;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false, length = 20)
+    private Role role = Role.VIEWER;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -148,6 +158,24 @@ public class User {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    /** @param passwordHash BCrypt hash, or {@code null} to disable login */
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
+    public Role getRole() {
+        return role;
+    }
+
+    /** {@code null} means {@link Role#VIEWER}. */
+    public void setRole(Role role) {
+        this.role = role == null ? Role.VIEWER : role;
     }
 
     public Instant getCreatedAt() {

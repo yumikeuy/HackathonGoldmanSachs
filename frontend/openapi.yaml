@@ -24,6 +24,9 @@ info:
     | `/topic/simulator` | `Delivery` — every delivery attempt | Role 1 |
 servers:
   - url: http://localhost:8080
+security:
+  - {}
+  - bearerAuth: []
 tags:
   - name: ingest
     description: Role 1
@@ -31,6 +34,8 @@ tags:
     description: Sources, teams, users — Role 1
   - name: simulator
     description: Delivery simulator — Role 1
+  - name: auth
+    description: UI login (JWT access + refresh tokens) — Role 1
   - name: rules
     description: Role 2
   - name: alerts
@@ -409,6 +414,101 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ChannelState' }
 
+  # ------------------------------------------------------------------ auth (Role 1)
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Log in with email and password
+      description: |
+        Returns a short-lived access token (send it as `Authorization: Bearer …`) and a refresh token.
+        Login is **enforced** only when the server runs with `JWT_ENABLED=true`; otherwise tokens are optional.
+        Max 10 attempts per email per minute (429).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: Wrong email or password
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          description: Too many attempts
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Exchange a refresh token for a new pair (the old refresh token stops working)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401':
+          description: Refresh token invalid, expired or already used — log in again
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: Logged out }
+  /api/auth/me:
+    get:
+      tags: [auth]
+      summary: The logged-in user (from the access token)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentUser' }
+        '401':
+          description: Not logged in
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/auth/runbook-links/{runbookId}:
+    get:
+      tags: [auth]
+      summary: A signed link to a runbook file, valid 5 minutes — to open it in a new tab without the token
+      parameters:
+        - name: runbookId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Signed link
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedLink' }
+
   # ------------------------------------------------------------------ rules (Role 2)
   /api/rules:
     get:
@@ -714,6 +814,15 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token from `POST /api/auth/login` (15 min). Required on `/api/**` only when the server runs with
+        `JWT_ENABLED=true`: GET → VIEWER, ack/resolve/replay → OPERATOR, every other change → ADMIN.
+        WebSocket: send it as the STOMP CONNECT header `Authorization: Bearer …`.
   parameters:
     Id:
       name: id
@@ -960,9 +1069,10 @@ components:
       allOf:
         - $ref: '#/components/schemas/UserInput'
         - type: object
-          required: [id, createdAt]
+          required: [id, createdAt, role, canLogIn]
           properties:
             id: { type: integer, format: int64 }
+            canLogIn: { type: boolean, description: Has an email and a password. The password itself is never returned. }
             createdAt: { type: string, format: date-time }
     UserInput:
       type: object
@@ -983,6 +1093,53 @@ components:
             - $ref: '#/components/schemas/WorkingHours'
             - type: 'null'
         active: { type: boolean, default: true }
+        role: { $ref: '#/components/schemas/Role' }
+        password:
+          type: string
+          writeOnly: true
+          description: Set or change the UI password (8–72 characters); `""` disables login; omit to keep it.
+
+    # ---------------- auth
+    Role:
+      type: string
+      enum: [VIEWER, OPERATOR, ADMIN]
+      default: VIEWER
+      description: VIEWER reads; OPERATOR also acks/resolves/replays; ADMIN also changes configuration.
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, example: anna.kowalska@bank.example }
+        password: { type: string, format: password }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+    TokenResponse:
+      type: object
+      required: [accessToken, refreshToken, tokenType, expiresIn, user]
+      properties:
+        accessToken: { type: string, description: JWT, send as `Authorization: Bearer …` }
+        refreshToken: { type: string, description: 'One-time: every refresh returns a new one.' }
+        tokenType: { type: string, example: Bearer }
+        expiresIn: { type: integer, description: Access token lifetime in seconds, example: 900 }
+        user: { $ref: '#/components/schemas/CurrentUser' }
+    CurrentUser:
+      type: object
+      required: [subject, email, name, role]
+      properties:
+        subject: { type: string, example: 'user:3' }
+        email: { type: string }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        teamId: { type: [integer, 'null'], format: int64 }
+    SignedLink:
+      type: object
+      required: [url, expiresAt]
+      properties:
+        url: { type: string, example: '/api/runbooks/3/file?exp=1795230000&sig=…' }
+        expiresAt: { type: string, format: date-time }
 
     # ---------------- simulator
     Delivery:

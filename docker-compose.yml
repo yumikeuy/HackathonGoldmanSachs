@@ -56,6 +56,11 @@ services:
       REDIS_HOST: redis
       MAIL_HOST: mailhog
       PUBLIC_URL: http://localhost:8080
+      # UI login (docs/security.md): JWT_ENABLED=true docker compose up -d to enforce it
+      JWT_ENABLED: ${JWT_ENABLED:-false}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-in-production-0123456789}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@alerting.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
     volumes:
       # File sources tail files here: a source with {"path": "/data/logs/app.log"} reads ./infra/logs/app.log
       - ./infra/logs:/data/logs

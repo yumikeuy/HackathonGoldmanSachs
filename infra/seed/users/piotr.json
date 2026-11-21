@@ -1,3 +1,4 @@
 {"teamId": __TEAM_ID__, "name": "Piotr Nowak", "email": "piotr.nowak@bank.example", "phone": "+48 600 100 002",
  "timezone": "Europe/Warsaw",
- "channelPreferences": [{"channel": "EMAIL", "hours": "00-24"}]}
+ "channelPreferences": [{"channel": "EMAIL", "hours": "00-24"}],
+ "role": "VIEWER", "password": "demo-password"}

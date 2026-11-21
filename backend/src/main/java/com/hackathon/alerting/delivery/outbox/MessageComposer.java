@@ -1,5 +1,6 @@
 package com.hackathon.alerting.delivery.outbox;
 
+import com.hackathon.alerting.common.security.RunbookLinkSigner;
 import com.hackathon.alerting.delivery.model.Channel;
 import com.hackathon.alerting.delivery.model.User;
 import com.hackathon.alerting.rules.model.Alert;
@@ -8,9 +9,12 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.time.Duration;
+
 /**
  * Renders the {@code delivery_outbox.payload} of a notification — the finished message for its channel, so the
- * worker only has to send it. The runbook is a link to {@code GET /api/runbooks/{id}/file}, never an attachment.
+ * worker only has to send it. The runbook is a link to {@code GET /api/runbooks/{id}/file}, never an attachment;
+ * the link is signed and works for {@link #RUNBOOK_LINK_TTL} without logging in ({@link RunbookLinkSigner}).
  *
  * <p>Payload fields: {@code alertId}, {@code severity}, {@code title}, {@code text}, {@code runbookUrl} (if any);
  * EMAIL adds {@code to} and {@code subject}, SMS and CALL add {@code to} (the phone number).
@@ -21,10 +25,15 @@ public class MessageComposer {
     /** SMS texts are cut to this length. */
     static final int SMS_MAX_LENGTH = 320;
 
-    private final String publicUrl;
+    /** How long a runbook link in a notification works without logging in. */
+    static final Duration RUNBOOK_LINK_TTL = Duration.ofDays(7);
 
-    public MessageComposer(@Value("${alerting.public-url:http://localhost:8080}") String publicUrl) {
+    private final String publicUrl;
+    private final RunbookLinkSigner links;
+
+    public MessageComposer(@Value("${alerting.public-url:http://localhost:8080}") String publicUrl, RunbookLinkSigner links) {
         this.publicUrl = publicUrl.endsWith("/") ? publicUrl.substring(0, publicUrl.length() - 1) : publicUrl;
+        this.links = links;
     }
 
     /** The team feed row of the UI channel. */
@@ -73,6 +82,6 @@ public class MessageComposer {
     }
 
     private String runbookUrl(Alert alert) {
-        return alert.getRunbook() == null ? null : publicUrl + "/api/runbooks/" + alert.getRunbook().getId() + "/file";
+        return alert.getRunbook() == null ? null : publicUrl + links.sign(alert.getRunbook().getId(), RUNBOOK_LINK_TTL).url();
     }
 }
