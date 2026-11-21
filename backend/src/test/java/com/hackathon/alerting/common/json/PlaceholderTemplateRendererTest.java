@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PlaceholderTemplateRendererTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
-    private final TemplateRenderer renderer = new PlaceholderTemplateRenderer(new ExactPathFieldLocator());
+    private final TemplateRenderer renderer = new PlaceholderTemplateRenderer(new DefaultJsonFieldLocator());
 
     @Test
     void substitutesValuesAndBlanksMissingOnes() {

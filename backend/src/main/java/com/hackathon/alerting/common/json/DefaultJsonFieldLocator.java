@@ -18,7 +18,7 @@ import java.util.Optional;
  * </ul>
  */
 @Component
-public class ExactPathFieldLocator implements JsonFieldLocator {
+public class DefaultJsonFieldLocator implements JsonFieldLocator {
 
     @Override
     public Optional<JsonNode> find(JsonNode event, String path, boolean strict) {

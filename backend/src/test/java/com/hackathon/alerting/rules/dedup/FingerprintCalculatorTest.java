@@ -1,6 +1,6 @@
 package com.hackathon.alerting.rules.dedup;
 
-import com.hackathon.alerting.common.json.ExactPathFieldLocator;
+import com.hackathon.alerting.common.json.DefaultJsonFieldLocator;
 import com.hackathon.alerting.rules.cache.RuleRoute;
 import com.hackathon.alerting.rules.model.GroupMode;
 import com.hackathon.alerting.rules.model.Rule;
@@ -18,7 +18,7 @@ class FingerprintCalculatorTest {
 
     private static final Instant T = Instant.parse("2026-11-21T10:00:10Z");
 
-    private final FingerprintCalculator calculator = new FingerprintCalculator(new ExactPathFieldLocator());
+    private final FingerprintCalculator calculator = new FingerprintCalculator(new DefaultJsonFieldLocator());
 
     @Test
     void groupsByRuleAndGroupByValues() {

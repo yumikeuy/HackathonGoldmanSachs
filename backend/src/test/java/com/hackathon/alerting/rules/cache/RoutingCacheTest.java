@@ -3,7 +3,7 @@ package com.hackathon.alerting.rules.cache;
 import com.hackathon.alerting.common.condition.DefaultConditionCompiler;
 import com.hackathon.alerting.common.config.ConfigChangedEvent;
 import com.hackathon.alerting.common.config.ConfigKinds;
-import com.hackathon.alerting.common.json.ExactPathFieldLocator;
+import com.hackathon.alerting.common.json.DefaultJsonFieldLocator;
 import com.hackathon.alerting.delivery.model.Team;
 import com.hackathon.alerting.delivery.repository.TeamRepository;
 import com.hackathon.alerting.rules.model.Rule;
@@ -27,7 +27,7 @@ class RoutingCacheTest {
     private final TeamRepository teams = mock(TeamRepository.class);
     private final RuleRepository rules = mock(RuleRepository.class);
     private final RoutingCache cache = new RoutingCache(teams, rules,
-            new DefaultConditionCompiler(new ExactPathFieldLocator()));
+            new DefaultConditionCompiler(new DefaultJsonFieldLocator()));
 
     private final Team rates = team(1, "Team Rates", "{\"path\":\"desk\",\"op\":\"==\",\"value\":\"rates\"}");
     private final Team fx = team(2, "Team FX", "{\"path\":\"ccy\",\"op\":\"==\",\"value\":\"EUR\"}");

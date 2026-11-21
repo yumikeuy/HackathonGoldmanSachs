@@ -9,10 +9,10 @@ import java.io.InputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class ExactPathFieldLocatorTest {
+class DefaultJsonFieldLocatorTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
-    private final JsonFieldLocator locator = new ExactPathFieldLocator();
+    private final JsonFieldLocator locator = new DefaultJsonFieldLocator();
 
     @Test
     void resolvesExactPathsAndArrayIndices() {
@@ -61,7 +61,7 @@ class ExactPathFieldLocatorTest {
     }
 
     private static JsonNode loadFixture(String resourcePath) throws IOException {
-        try (InputStream in = ExactPathFieldLocatorTest.class.getClassLoader().getResourceAsStream(resourcePath)) {
+        try (InputStream in = DefaultJsonFieldLocatorTest.class.getClassLoader().getResourceAsStream(resourcePath)) {
             assertThat(in).as(resourcePath).isNotNull();
             return JSON.readTree(in);
         }
