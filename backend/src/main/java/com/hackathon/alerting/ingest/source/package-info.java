@@ -1,4 +1,4 @@
 /**
- * Источники: слушатели внешних Kafka-топиков из таблицы sources, SourceAdapter, tail лог-файла (бонус).
+ * External event sources: listeners of Kafka topics from table sources, source cache. Owner: Role 1.
  */
 package com.hackathon.alerting.ingest.source;

@@ -5,6 +5,7 @@ import com.hackathon.alerting.common.config.ConfigChangedPublisher;
 import com.hackathon.alerting.common.json.JsonFieldLocator;
 import com.hackathon.alerting.common.json.TemplateRenderer;
 import com.hackathon.alerting.delivery.outbox.OutboxService;
+import com.hackathon.alerting.ingest.recent.RecentEvents;
 import com.hackathon.alerting.runbooks.RunbookService;
 import com.hackathon.alerting.runbooks.audit.AuditService;
 import com.hackathon.alerting.support.PostgresTestConfiguration;
@@ -30,7 +31,7 @@ class AlertingApplicationTest {
     @Test
     void startsWithOneImplementationOfEveryContract() {
         for (Class<?> contract : new Class<?>[]{ConditionCompiler.class, JsonFieldLocator.class, TemplateRenderer.class,
-                RunbookService.class, AuditService.class, OutboxService.class, ConfigChangedPublisher.class}) {
+                RunbookService.class, AuditService.class, OutboxService.class, ConfigChangedPublisher.class, RecentEvents.class}) {
             assertThat(context.getBeanNamesForType(contract)).as(contract.getSimpleName()).hasSize(1);
         }
     }

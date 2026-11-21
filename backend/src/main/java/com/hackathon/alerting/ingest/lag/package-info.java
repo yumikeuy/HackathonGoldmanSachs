@@ -1,4 +1,4 @@
 /**
- * GET /api/ingest/lag: отставание consumer group через AdminClient.
+ * GET /api/ingest/lag: consumer group lag via AdminClient. Owner: Role 1.
  */
 package com.hackathon.alerting.ingest.lag;
