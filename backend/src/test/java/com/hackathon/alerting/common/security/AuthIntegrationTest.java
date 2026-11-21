@@ -243,6 +243,46 @@ class AuthIntegrationTest {
         assertThat(receives(admin, "/topic/unrouted")).as("admin: unrouted feed").isTrue();
     }
 
+    @Test
+    void operatorsManageRunbooksOfTheirOwnTeamOnly() {
+        String admin = login(ADMIN_EMAIL, ADMIN_PASSWORD).get("accessToken").asString();
+        String marker = UUID.randomUUID().toString();
+        long teamA = createTeamWithRule(admin, "RB-A-" + marker);
+        long teamB = createTeamWithRule(admin, "RB-B-" + marker);
+        String viewer = createUserAndLogin(admin, teamA, "VIEWER");
+        String operator = createUserAndLogin(admin, teamA, "OPERATOR");
+
+        // create: own team only; no global runbooks, no other teams; viewers cannot
+        long own = createRunbook(operator, teamA);
+        assertThat(uploadStatus("POST", "/api/runbooks", operator, teamB)).isEqualTo(403);
+        assertThat(uploadStatus("POST", "/api/runbooks", operator, null)).as("global").isEqualTo(403);
+        assertThat(uploadStatus("POST", "/api/runbooks", viewer, teamA)).isEqualTo(403);
+        long global = createRunbook(admin, null);
+        long otherTeam = createRunbook(admin, teamB);
+
+        // edit: own team's runbooks, and they stay in that team
+        assertThat(uploadStatus("PUT", "/api/runbooks/" + own, operator, teamA)).isEqualTo(200);
+        assertThat(uploadStatus("PUT", "/api/runbooks/" + own, operator, teamB)).as("move to another team").isEqualTo(403);
+        assertThat(uploadStatus("PUT", "/api/runbooks/" + own, operator, null)).as("make global").isEqualTo(403);
+        assertThat(uploadStatus("PUT", "/api/runbooks/" + global, operator, teamA)).isEqualTo(403);
+        assertThat(uploadStatus("PUT", "/api/runbooks/" + otherTeam, operator, teamA)).isEqualTo(403);
+        assertThat(uploadStatus("PUT", "/api/runbooks/" + own, viewer, teamA)).isEqualTo(403);
+
+        // read: own team's and global runbooks, as before
+        assertThat(status("GET", "/api/runbooks/" + global, operator, null)).isEqualTo(200);
+        assertThat(status("GET", "/api/runbooks/" + otherTeam, operator, null)).isEqualTo(403);
+
+        // delete: own team's only
+        assertThat(status("DELETE", "/api/runbooks/" + global, operator, null)).isEqualTo(403);
+        assertThat(status("DELETE", "/api/runbooks/" + otherTeam, operator, null)).isEqualTo(403);
+        assertThat(status("DELETE", "/api/runbooks/" + own, viewer, null)).isEqualTo(403);
+        assertThat(status("DELETE", "/api/runbooks/" + own, operator, null)).isEqualTo(204);
+
+        // administrators keep full control
+        assertThat(uploadStatus("PUT", "/api/runbooks/" + otherTeam, admin, null)).as("admin makes it global").isEqualTo(200);
+        assertThat(status("DELETE", "/api/runbooks/" + global, admin, null)).isEqualTo(204);
+    }
+
     private long createTeamWithRule(String admin, String desk) {
         long teamId = http().post().uri("/api/teams").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -328,6 +368,37 @@ class AuthIntegrationTest {
     private int refreshStatus(String refreshToken) {
         return http().post().uri("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("refreshToken", refreshToken)).retrieve().toBodilessEntity().getStatusCode().value();
+    }
+
+    /** Uploads a small runbook ({@code teamId} null = global) and returns its id; fails unless 201. */
+    private long createRunbook(String token, Long teamId) {
+        var response = http().post().uri("/api/runbooks").headers(h -> h.setBearerAuth(token))
+                .contentType(MediaType.MULTIPART_FORM_DATA).body(runbookParts(teamId, true)).retrieve().toEntity(JsonNode.class);
+        assertThat(response.getStatusCode().value()).as("create runbook").isEqualTo(201);
+        return response.getBody().get("id").asLong();
+    }
+
+    /** Status of a multipart runbook create ({@code POST}, with a file) or update ({@code PUT}, metadata only). */
+    private int uploadStatus(String method, String uri, String token, Long teamId) {
+        return http().method(org.springframework.http.HttpMethod.valueOf(method)).uri(uri).headers(h -> h.setBearerAuth(token))
+                .contentType(MediaType.MULTIPART_FORM_DATA).body(runbookParts(teamId, "POST".equals(method)))
+                .retrieve().toBodilessEntity().getStatusCode().value();
+    }
+
+    private static MultiValueMap<String, Object> runbookParts(Long teamId, boolean withFile) {
+        MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        if (withFile) {
+            parts.add("file", new ByteArrayResource("# Steps".getBytes(StandardCharsets.UTF_8)) {
+                @Override
+                public String getFilename() {
+                    return "steps.md";
+                }
+            });
+        }
+        if (teamId != null) {
+            parts.add("teamId", teamId.toString());
+        }
+        return parts;
     }
 
     private int status(String method, String uri, String token, Object body) {
