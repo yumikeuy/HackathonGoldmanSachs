@@ -1,0 +1,9 @@
+runbook: high-cpu
+applies_to: [cpu, memory]
+steps:
+  - check: top processes on the host (top -o %CPU)
+  - check: recent deployments of the service in labels.service
+  - action: scale out the service if load is legitimate
+  - action: restart the offending process if it is stuck
+contacts:
+  - infra-oncall@bank.example

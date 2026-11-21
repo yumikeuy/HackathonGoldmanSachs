@@ -74,6 +74,9 @@ management:
         include: health,info,prometheus
 
 alerting:
+  dev:
+    # POST /api/dev/generate — the test event generator (Role 2). Switch off in production.
+    generator-enabled: ${DEV_GENERATOR_ENABLED:true}
   # Base URL used in notification links (runbook files)
   public-url: ${PUBLIC_URL:http://localhost:8080}
   ingest:
