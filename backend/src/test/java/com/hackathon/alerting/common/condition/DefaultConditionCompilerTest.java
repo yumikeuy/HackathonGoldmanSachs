@@ -1,6 +1,6 @@
 package com.hackathon.alerting.common.condition;
 
-import com.hackathon.alerting.common.json.DefaultJsonFieldLocator;
+import com.hackathon.alerting.common.json.ExactPathFieldLocator;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DefaultConditionCompilerTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
-    private final ConditionCompiler compiler = new DefaultConditionCompiler(new DefaultJsonFieldLocator());
+    private final ConditionCompiler compiler = new DefaultConditionCompiler(new ExactPathFieldLocator());
 
     @Test
     void nullConditionMatchesEverything() {
