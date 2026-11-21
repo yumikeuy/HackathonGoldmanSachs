@@ -12,6 +12,8 @@ import { TeamModal } from './TeamModal';
 import { UserModal } from './UserModal';
 import type { Team, User } from '../../types';
 
+const ROLE_LABEL = { VIEWER: 'Viewer', OPERATOR: 'Operator', ADMIN: 'Admin' } as const;
+
 export function RecipientsPage() {
   const { teams, users, rules, alerts, configLoaded, teamName, reloadTeams, reloadUsers } = useStore();
   const toast = useToast();
@@ -111,7 +113,13 @@ export function RecipientsPage() {
                 const inWh = inWorkingHours(u.workingHours, u.timezone ?? 'UTC');
                 return (
                   <tr key={u.id} className={cx('hover:bg-gray-50', !u.active && 'opacity-50')}>
-                    <td className="td pl-5"><div className="text-sm font-medium text-gray-900">{u.name}</div><div className="text-[13px] text-gray-500">{u.email ?? '—'}</div></td>
+                    <td className="td pl-5">
+                      <div className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                        {u.name}
+                        {u.canLogIn && <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600" title="Can log in to this app">{ROLE_LABEL[u.role ?? 'VIEWER']}</span>}
+                      </div>
+                      <div className="text-[13px] text-gray-500">{u.email ?? '—'}</div>
+                    </td>
                     <td className="td"><Scope teamId={u.teamId} name={teamName(u.teamId) ?? undefined} /></td>
                     <td className="td text-[13px] text-gray-600 whitespace-nowrap">{u.phone ?? '—'}</td>
                     <td className="td text-[13px] text-gray-600 whitespace-nowrap">{u.timezone}<div className="text-xs text-gray-400">{localTime(u.timezone ?? 'UTC')} local time</div></td>

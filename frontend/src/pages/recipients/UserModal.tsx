@@ -1,6 +1,9 @@
-/** Add / edit user: contact, team, time zone, working hours and channel preferences in priority order. */
+/**
+ * Add / edit user: contact, team, time zone, working hours, channel preferences in priority order, and UI login —
+ * role and password (write-only: the server stores a BCrypt hash and only reports `canLogIn`).
+ */
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Loader } from 'lucide-react';
+import { ArrowDown, ArrowUp, KeyRound, Loader } from 'lucide-react';
 import * as api from '../../api/endpoints';
 import { errorText } from '../../api/client';
 import { useStore } from '../../state/store';
@@ -8,6 +11,14 @@ import { useToast } from '../../components/Toast';
 import { CHAN, Modal, ModalFoot, ModalHead, Toggle } from '../../components/ui';
 import { DAYS } from '../../utils/format';
 import type { Channel, ChannelPreference, User, UserInput } from '../../types';
+
+type Role = NonNullable<UserInput['role']>;
+
+const ROLES: Array<[Role, string, string]> = [
+  ['VIEWER', 'Viewer', 'sees alerts and configuration'],
+  ['OPERATOR', 'Operator', 'also acknowledges and resolves alerts'],
+  ['ADMIN', 'Admin', 'also changes teams, users, rules, runbooks and sources'],
+];
 
 type Mode = 'always' | 'working' | 'custom';
 interface PrefDraft { channel: Channel; on: boolean; mode: Mode; hours: string }
@@ -46,6 +57,9 @@ function UserModalInner({ user, onClose }: { user: User | null; onClose: () => v
   const [hasWh, setHasWh] = useState(user ? user.workingHours != null : true);
   const [wh, setWh] = useState({ from: wh0.from, to: wh0.to, days: [...wh0.days] });
   const [prefs, setPrefs] = useState<PrefDraft[]>(() => prefsToDraft(user?.channelPreferences ?? [{ channel: 'EMAIL' }], wh0));
+  const [role, setRole] = useState<Role>(user?.role ?? 'VIEWER');
+  const [password, setPassword] = useState('');
+  const [disableLogin, setDisableLogin] = useState(false);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -70,13 +84,18 @@ function UserModalInner({ user, onClose }: { user: User | null; onClose: () => v
     if (on.some(p => p.mode === 'working') && !hasWh) errs.push('“Working hours only” needs working hours');
     if (on.some(p => p.mode === 'custom' && !HOURS_RE.test(p.hours))) errs.push('Custom hours look like 08-20');
     if (hasWh && !wh.days.length) errs.push('Pick at least one working day');
+    if (password && password.length < 8) errs.push('The password needs at least 8 characters');
+    if (password && password.length > 72) errs.push('The password can have at most 72 characters');
+    if (password && !email.trim()) errs.push('Login needs an email address — it is the user name');
     if (errs.length) { setErr(errs[0]); return; }
 
     const body: UserInput = {
       teamId: teamId!, name: name.trim(), email: email.trim() || null, phone: phone.trim() || null, timezone: tz, active,
       workingHours: hasWh ? { from: wh.from, to: wh.to, days: [...wh.days].sort((a, b) => a - b) } : null,
       channelPreferences: on.map(p => ({ channel: p.channel, hours: p.mode === 'always' ? null : p.mode === 'working' ? hoursFromWorking(wh) : p.hours })),
-      role: user?.role, // keep the login role (managed on the backend side)
+      role,
+      // omitted: keep the current password; "": disable login
+      ...(disableLogin ? { password: '' } : password ? { password } : {}),
     };
     setSaving(true);
     setErr('');
@@ -112,6 +131,38 @@ function UserModalInner({ user, onClose }: { user: User | null; onClose: () => v
             <select className="inp w-full" value={tz} onChange={e => setTz(e.target.value)}>{tzOptions.map(z => <option key={z} value={z}>{z}</option>)}</select>
           </div>
           <div><label className="label">Active</label><div className="h-9 flex items-center"><Toggle on={active} onChange={() => setActive(!active)} label="User active" /></div></div>
+        </div>
+
+        <div>
+          <label className="label flex items-center gap-2">
+            <KeyRound className="w-4 h-4 text-gray-400" />Login to this app
+            <span className="ml-auto font-normal text-gray-500">
+              {user?.canLogIn && !disableLogin ? 'Can log in' : disableLogin ? 'Login will be disabled' : 'Cannot log in yet'}
+            </span>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label font-normal text-gray-500" htmlFor="user-role">Role</label>
+              <select id="user-role" className="inp w-full" value={role} onChange={e => setRole(e.target.value as Role)}>
+                {ROLES.map(([value, label, hint]) => <option key={value} value={value}>{label} — {hint}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label font-normal text-gray-500" htmlFor="user-password">
+                {user?.canLogIn ? 'New password (leave empty to keep)' : 'Password (8+ characters)'}
+              </label>
+              <input id="user-password" className="inp w-full" type="password" autoComplete="new-password" maxLength={72}
+                     value={password} disabled={disableLogin} onChange={e => setPassword(e.target.value)}
+                     placeholder={user?.canLogIn ? '••••••••' : 'Set to allow login'} />
+            </div>
+          </div>
+          {user?.canLogIn && (
+            <label className="mt-2 inline-flex items-center gap-2 text-[13px] text-gray-600">
+              <input type="checkbox" className="rounded border-gray-300" checked={disableLogin}
+                     onChange={e => { setDisableLogin(e.target.checked); setPassword(''); }} />
+              Disable login (notifications keep working)
+            </label>
+          )}
         </div>
 
         <div>
