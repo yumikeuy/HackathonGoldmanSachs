@@ -8,6 +8,7 @@ import * as api from '../../api/endpoints';
 import { errorText } from '../../api/client';
 import { useStore } from '../../state/store';
 import { useToast } from '../../components/Toast';
+import { session } from '../../auth/session';
 import { CHAN, Modal, ModalFoot, ModalHead, Toggle } from '../../components/ui';
 import { DAYS } from '../../utils/format';
 import type { Channel, ChannelPreference, User, UserInput } from '../../types';
@@ -57,6 +58,9 @@ function UserModalInner({ user, onClose }: { user: User | null; onClose: () => v
   const [hasWh, setHasWh] = useState(user ? user.workingHours != null : true);
   const [wh, setWh] = useState({ from: wh0.from, to: wh0.to, days: [...wh0.days] });
   const [prefs, setPrefs] = useState<PrefDraft[]>(() => prefsToDraft(user?.channelPreferences ?? [{ channel: 'EMAIL' }], wh0));
+  // Only an administrator sets roles and passwords (the server enforces it: 403 for anyone else).
+  // Without enforced login nobody is signed in and the section is shown.
+  const canManageLogin = !session.loggedIn || session.user?.role === 'ADMIN';
   const [role, setRole] = useState<Role>(user?.role ?? 'VIEWER');
   const [password, setPassword] = useState('');
   const [disableLogin, setDisableLogin] = useState(false);
@@ -93,9 +97,9 @@ function UserModalInner({ user, onClose }: { user: User | null; onClose: () => v
       teamId: teamId!, name: name.trim(), email: email.trim() || null, phone: phone.trim() || null, timezone: tz, active,
       workingHours: hasWh ? { from: wh.from, to: wh.to, days: [...wh.days].sort((a, b) => a - b) } : null,
       channelPreferences: on.map(p => ({ channel: p.channel, hours: p.mode === 'always' ? null : p.mode === 'working' ? hoursFromWorking(wh) : p.hours })),
-      role,
+      role: canManageLogin ? role : user?.role,
       // omitted: keep the current password; "": disable login
-      ...(disableLogin ? { password: '' } : password ? { password } : {}),
+      ...(!canManageLogin ? {} : disableLogin ? { password: '' } : password ? { password } : {}),
     };
     setSaving(true);
     setErr('');
@@ -133,7 +137,7 @@ function UserModalInner({ user, onClose }: { user: User | null; onClose: () => v
           <div><label className="label">Active</label><div className="h-9 flex items-center"><Toggle on={active} onChange={() => setActive(!active)} label="User active" /></div></div>
         </div>
 
-        <div>
+        {canManageLogin && <div>
           <label className="label flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-gray-400" />Login to this app
             <span className="ml-auto font-normal text-gray-500">
@@ -163,7 +167,7 @@ function UserModalInner({ user, onClose }: { user: User | null; onClose: () => v
               Disable login (notifications keep working)
             </label>
           )}
-        </div>
+        </div>}
 
         <div>
           <label className="label flex items-center gap-2">
