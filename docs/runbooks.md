@@ -92,7 +92,23 @@ Attachment assigns `runbookRepository.getReferenceById(id)` (no extra `SELECT` o
 
 ---
 
-## 5. Audit Trail
+## 5. Who Can Manage Runbooks
+
+With login enforced (`JWT_ENABLED=true`, see [security.md](security.md)):
+
+| Role | Runbooks |
+|---|---|
+| `VIEWER` | sees their team's and the global runbooks, opens the files; the editor opens read-only |
+| `OPERATOR` | + creates, edits and deletes runbooks **of their own team** — the scope is fixed to that team |
+| `ADMIN` | + every runbook, including **global** ones; may move a runbook between teams or make it global |
+
+Global runbooks apply to every team, so they stay with administrators. The server enforces this
+(`SecurityConfig` for the role, `TeamScopeInterceptor` for the team: 403 otherwise); the UI hides what would be refused.
+
+In the UI (Runbooks page) the list works like the Rules page: **New runbook** (or a file dropped on the page) and a
+click on a row open the runbook editor — file, scope, when to attach (conditions or "only when a rule picks it").
+
+## 6. Audit Trail
 
 Whenever `DefaultRunbookService` attaches a runbook, it writes an audit entry in the same transaction via `AuditService.log(...)`:
 
