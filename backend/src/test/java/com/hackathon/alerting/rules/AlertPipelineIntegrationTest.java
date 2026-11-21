@@ -11,20 +11,19 @@ import com.hackathon.alerting.rules.model.Presentation;
 import com.hackathon.alerting.rules.cache.RoutingCache;
 import com.hackathon.alerting.rules.cache.RoutingTable;
 import com.hackathon.alerting.rules.model.Rule;
+import io.micrometer.core.instrument.MeterRegistry;
 import com.hackathon.alerting.rules.repository.RuleRepository;
 import com.hackathon.alerting.support.KafkaTestConfiguration;
 import com.hackathon.alerting.support.PostgresTestConfiguration;
 import com.hackathon.alerting.support.RedisTestConfiguration;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -40,7 +39,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -53,20 +51,10 @@ import static org.awaitility.Awaitility.await;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import({PostgresTestConfiguration.class, KafkaTestConfiguration.class, RedisTestConfiguration.class,
-        AlertPipelineIntegrationTest.Topics.class})
+@Import({PostgresTestConfiguration.class, KafkaTestConfiguration.class, RedisTestConfiguration.class})
 class AlertPipelineIntegrationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
-
-    /** Creates the topic before the listener subscribes (in production Role 1's NewTopic beans do this). */
-    @TestConfiguration(proxyBeanMethods = false)
-    static class Topics {
-        @Bean
-        NewTopic eventsIngest() {
-            return new NewTopic(KafkaTopics.EVENTS_INGEST, 6, (short) 1);
-        }
-    }
 
     @Autowired
     private KafkaTemplate<String, String> kafka;
@@ -87,6 +75,12 @@ class AlertPipelineIntegrationTest {
     private RoutingCache routing;
 
     @Autowired
+    private MeterRegistry meters;
+
+    @Autowired
+    private StringRedisTemplate redis;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     @Autowired
@@ -102,7 +96,8 @@ class AlertPipelineIntegrationTest {
         team.setCondition(json.readTree("{\"path\":\"desk\",\"op\":\"==\",\"value\":\"" + desk + "\"}"));
         team = teams.save(team);
         long teamId = team.getId();
-        publishAndAwait(ConfigKinds.TEAMS, table -> table.teams().stream().anyMatch(t -> t.teamId() == teamId));
+        ConfigChanges.publishAndAwait(configChanged, ConfigKinds.TEAMS,
+                () -> routing.current().teams().stream().anyMatch(t -> t.teamId() == teamId), TIMEOUT);
     }
 
     // ------------------------------------------------------------------ processing
@@ -110,6 +105,8 @@ class AlertPipelineIntegrationTest {
     @Test
     void burstOfIdenticalEventsBecomesOneAlertWithCounter() {
         Rule rule = rule("Rejected trades", r -> r.setGroupByPaths(List.of("instrument")));
+        double createdBefore = counter("alerting.alerts.created", "severity", "MEDIUM");
+        double repeatsBefore = meters.get("alerting.alerts.repeats").counter().count();
 
         sendAll(IntStream.range(0, 500).mapToObj(i -> event(Map.of("instrument", "EUR-IRS-10Y", "seq", i))).toList());
 
@@ -119,6 +116,11 @@ class AlertPipelineIntegrationTest {
                     assertThat(alert.get("status")).isEqualTo("OPEN");
                     assertThat(alert.get("severity")).isEqualTo("MEDIUM");
                 }));
+        long alertId = ((Number) alertsOf(rule).getFirst().get("id")).longValue();
+        assertThat(auditActions(alertId)).containsExactly("ALERT_CREATED");
+        assertThat(counter("alerting.alerts.created", "severity", "MEDIUM")).isGreaterThanOrEqualTo(createdBefore + 1);
+        assertThat(meters.get("alerting.alerts.repeats").counter().count()).isGreaterThanOrEqualTo(repeatsBefore + 499);
+        assertThat(meters.get("alerting.processing.delay").timer().count()).isPositive();
     }
 
     @Test
@@ -144,9 +146,13 @@ class AlertPipelineIntegrationTest {
 
         send(event(Map.of("status", "FAILED")));
         await().atMost(TIMEOUT).until(() -> alertsOf(rule).size() == 1);
+        double resolvedByRuleBefore = counter("alerting.alerts.resolved", "by", "rule");
         send(event(Map.of("status", "OK")));
         await().atMost(TIMEOUT).untilAsserted(() -> assertThat(alertsOf(rule)).singleElement()
                 .satisfies(a -> assertThat(a.get("status")).isEqualTo("RESOLVED")));
+        long resolvedId = ((Number) alertsOf(rule).getFirst().get("id")).longValue();
+        assertThat(auditActions(resolvedId)).containsExactly("ALERT_CREATED", "AUTO_CLOSE");
+        assertThat(counter("alerting.alerts.resolved", "by", "rule")).isGreaterThanOrEqualTo(resolvedByRuleBefore + 1);
         send(event(Map.of("status", "FAILED")));
 
         await().atMost(TIMEOUT).untilAsserted(() -> assertThat(alertsOf(rule))
@@ -257,6 +263,9 @@ class AlertPipelineIntegrationTest {
                 .bodyJson().extractingPath("$.status").isEqualTo("RESOLVED");
         assertThat(mvc.post().uri("/api/alerts/" + id + "/resolve")).as("idempotent").hasStatusOk();
         assertThat(mvc.post().uri("/api/alerts/" + id + "/ack")).hasStatus(409);
+        assertThat(auditActions(id)).containsExactly("ALERT_CREATED", "ACK", "RESOLVE");
+        assertThat(jdbc.queryForObject("select actor from audit_logs where alert_id = ? and action_type = 'ACK'",
+                String.class, id)).isEqualTo("anna@bank.com");
 
         assertThat(mvc.get().uri("/api/alerts/" + id)).hasStatusOk().bodyJson()
                 .extractingPath("$.samplePayload.desk").isEqualTo(desk);
@@ -267,6 +276,39 @@ class AlertPipelineIntegrationTest {
         assertThat(mvc.get().uri("/api/alerts/999999999")).hasStatus(404);
     }
 
+    @Test
+    void unroutedAlertGetsTeamSuggestionsFromNearMissesAndSourceHistory() throws Exception {
+        Team deals = new Team("Deals " + desk);
+        deals.setCondition(json.readTree("{\"and\":[{\"path\":\"desk\",\"op\":\"==\",\"value\":\"" + desk + "\"},"
+                + "{\"path\":\"kind\",\"op\":\"==\",\"value\":\"DEAL\"}]}"));
+        deals = teams.save(deals);
+        long dealsId = deals.getId();
+        ConfigChanges.publishAndAwait(configChanged, ConfigKinds.TEAMS,
+                () -> routing.current().teams().stream().anyMatch(t -> t.teamId() == dealsId), TIMEOUT);
+        String source = "deals-" + UUID.randomUUID();
+
+        // History: one routed event of this source; it matches both of this test's teams.
+        send(envelope(source, json.readTree("{\"desk\":\"" + desk + "\",\"kind\":\"DEAL\"}")));
+        await().atMost(TIMEOUT).until(() -> Boolean.TRUE.equals(redis.hasKey("src:teams:" + source)));
+        // The unrouted one: no desk, so no team matches; "kind" alone is a near miss for the Deals team.
+        send(envelope(source, json.readTree("{\"kind\":\"DEAL\",\"ref\":\"X-1\"}")));
+        String title = "Unrouted event from " + source;
+        await().atMost(TIMEOUT).until(() -> !jdbc.queryForList("select id from alerts where title = ?", Long.class, title).isEmpty());
+        long unroutedId = jdbc.queryForObject("select id from alerts where title = ?", Long.class, title);
+
+        JsonNode suggestions = body(mvc.get().uri("/api/alerts/" + unroutedId + "/team-suggestions").exchange());
+
+        assertThat(suggestions.get(0).get("teamId").asLong()).isEqualTo(dealsId);
+        assertThat(suggestions.get(0).get("score").asDouble()).as("0.7 × 1/2 conditions + 0.3 × 1/2 history").isEqualTo(0.5);
+        assertThat(suggestions.get(0).get("reason").asString())
+                .isEqualTo("1 of 2 conditions match; 1 event from source " + source + " was routed to this team");
+        assertThat(suggestions.findValues("teamId")).extracting(JsonNode::asLong).contains(team.getId());
+
+        long routedId = jdbc.queryForObject("select id from alerts where team_id is not null order by id limit 1", Long.class);
+        assertThat(mvc.get().uri("/api/alerts/" + routedId + "/team-suggestions")).hasStatusOk().bodyJson().isEqualTo("[]");
+        assertThat(mvc.get().uri("/api/alerts/999999999/team-suggestions")).hasStatus(404);
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /** Saves an active rule of this test's team and reloads the routing cache. */
@@ -275,25 +317,16 @@ class AlertPipelineIntegrationTest {
         customizer.accept(rule);
         rule = rules.save(rule);
         long ruleId = rule.getId();
-        publishAndAwait(ConfigKinds.RULES, table -> hasRule(table, ruleId));
+        ConfigChanges.publishAndAwait(configChanged, ConfigKinds.RULES, () -> hasRule(routing.current(), ruleId), TIMEOUT);
         return rule;
     }
 
-    /**
-     * Announces a configuration change and waits until the routing table reflects it, so events sent afterwards are
-     * routed with the new configuration. Reloads arrive asynchronously over Redis Pub/Sub, and right after startup the
-     * subscription is still being made in the background, so a first message can be lost: while waiting, the change is
-     * re-announced (a reload is idempotent).
-     */
-    private void publishAndAwait(String kind, Predicate<RoutingTable> applied) {
-        configChanged.publish(kind);
-        await().atMost(TIMEOUT).pollInterval(Duration.ofMillis(250)).until(() -> {
-            if (applied.test(routing.current())) {
-                return true;
-            }
-            configChanged.publish(kind);
-            return false;
-        });
+    private List<String> auditActions(long alertId) {
+        return jdbc.queryForList("select action_type from audit_logs where alert_id = ? order by created_at, id", String.class, alertId);
+    }
+
+    private double counter(String name, String tag, String value) {
+        return meters.get(name).tag(tag, value).counter().count();
     }
 
     private static boolean hasRule(RoutingTable table, long ruleId) {
