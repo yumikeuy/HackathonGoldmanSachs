@@ -1,4 +1,4 @@
 /**
- * RunbookService.attach: подбор по условиям и выбор главного runbook.
+ * RunbookService implementation: picks the runbook for a new alert. Owner: Role 3.
  */
 package com.hackathon.alerting.runbooks.matching;

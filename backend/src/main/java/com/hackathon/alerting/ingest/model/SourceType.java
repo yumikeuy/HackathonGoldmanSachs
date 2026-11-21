@@ -1,11 +1,13 @@
 package com.hackathon.alerting.ingest.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
 import com.hackathon.alerting.common.persistence.CodedEnum;
 import com.hackathon.alerting.common.persistence.CodedEnumConverter;
 import jakarta.persistence.Converter;
 
 /**
- * Event source type. Stored in lowercase in the database and in the {@code events.ingest} envelope
+ * Event source type. Lowercase in the database, in REST JSON and in the {@code events.ingest} envelope
  * ({@code sources.type}, envelope field {@code source_type}).
  */
 public enum SourceType implements CodedEnum {
@@ -24,8 +26,24 @@ public enum SourceType implements CodedEnum {
     }
 
     @Override
+    @JsonValue
     public String code() {
         return code;
+    }
+
+    /**
+     * Parses a lowercase code as used in the database, JSON and the event envelope.
+     *
+     * @throws IllegalArgumentException for an unknown code
+     */
+    @JsonCreator
+    public static SourceType fromCode(String code) {
+        for (SourceType type : values()) {
+            if (type.code.equals(code)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unknown source type '" + code + "'");
     }
 
     /** JPA converter {@code SourceType ↔ 'http' | 'kafka' | 'file'}. */

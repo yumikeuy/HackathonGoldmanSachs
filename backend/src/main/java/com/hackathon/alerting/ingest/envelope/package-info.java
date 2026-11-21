@@ -1,4 +1,4 @@
 /**
- * Конверт события: event_id, ingested_at, source_type, source_name, raw_payload.
+ * The events.ingest message: {@link com.hackathon.alerting.ingest.envelope.EventEnvelope}. Owner: Role 1.
  */
 package com.hackathon.alerting.ingest.envelope;
