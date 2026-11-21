@@ -54,7 +54,7 @@ always be accepted. Instead, files are **served** so they cannot run code (`Safe
 
 | File | `Content-Disposition` |
 |---|---|
-| PDF, plain text, Markdown, CSV, PNG/JPEG/GIF/WebP/BMP | `inline` (viewed in the browser) |
+| PDF, plain text, Markdown, CSV, YAML, PNG/JPEG/GIF/WebP/BMP | `inline` (viewed in the browser) |
 | HTML, SVG, XML, JavaScript, anything unknown | `attachment` (downloaded, never rendered on our origin) |
 | a "text" file whose content starts like markup (`<html`, `<script`, `<svg`, `<?xml`, …) | `attachment` |
 

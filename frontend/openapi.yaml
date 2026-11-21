@@ -1023,8 +1023,10 @@ components:
           description: |
             Type-specific settings:
             - `kafka`: `{"topic": "workflow.events"}` — consume this external topic;
-            - `file`: `{"path": "/data/logs/app.log"}` — tail this file (path inside the backend container);
-              each new line is one event: a JSON line as is, any other line as `{"message": "<line>"}`;
+            - `file`: `{"path": "/data/logs/app.log", "pattern": "(?<level>[A-Z]+) (?<service>[\\w-]+): .*"}` — tail this
+              file (path inside the backend container); each new line is one event: a JSON line as is; a line matching
+              the optional `pattern` (Java regex with named groups) as its groups plus `message`; any other line as
+              `{"message": "<line>"}`. An invalid pattern or one without named groups → 400;
             - `http`: `{}` — events arrive at `POST /api/ingest/{name}`.
           default: {}
         active: { type: boolean, default: true }

@@ -98,6 +98,30 @@ class FileTailerTest {
         assertThat(lines).containsExactly("a", "b", "c");
     }
 
+    @Test
+    void aNewTailerResumesFromTheCheckpointOfTheSameFile() throws IOException {
+        Path file = dir.resolve("app.log");
+        append(file, "");
+        FileTailer.Checkpoint checkpoint;
+        try (FileTailer first = new FileTailer(file, lines::add, true)) {
+            append(file, "1\n2\n");
+            first.poll();
+            checkpoint = first.checkpoint().orElseThrow();
+        }
+        append(file, "3\n4\n");                              // written while nobody tails the file
+        try (FileTailer second = new FileTailer(file, lines::add, true, checkpoint)) {
+            second.poll();
+        }
+        assertThat(lines).containsExactly("1", "2", "3", "4");
+
+        lines.clear();
+        try (FileTailer stale = new FileTailer(file, lines::add, true, new FileTailer.Checkpoint("another-file", 2))) {
+            append(file, "5\n");
+            stale.poll();
+        }
+        assertThat(lines).as("checkpoint of another file is ignored").containsExactly("5");
+    }
+
     private static void append(Path file, String text) throws IOException {
         Files.writeString(file, text, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
     }
