@@ -1,0 +1,9 @@
+{"teamId": __TEAM_ID__, "name": "Failed workflows",
+ "condition": {"path": "status", "op": "==", "value": "FAILED"},
+ "assignedSeverity": "CRITICAL", "channels": ["EMAIL", "CALL", "UI"],
+ "groupByPaths": ["workflow"], "groupMode": "while_open", "dedupWindowSec": 600,
+ "presentation": {"title": "Workflow {{workflow}} failed at {{step}}"},
+ "resolveCondition": {"and": [
+   {"path": "status", "op": "==", "value": "OK"},
+   {"path": "workflow", "op": "exists", "value": true}
+ ]}}

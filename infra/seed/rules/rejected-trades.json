@@ -1,0 +1,5 @@
+{"teamId": __TEAM_ID__, "name": "Rejected trades",
+ "condition": {"path": "type", "op": "==", "value": "TRADE_REJECTED"},
+ "assignedSeverity": "HIGH", "channels": ["EMAIL", "SMS", "UI"],
+ "groupByPaths": ["instrument"], "groupMode": "while_open", "dedupWindowSec": 300,
+ "presentation": {"title": "Rejected {{trade.id}} on {{instrument}} ({{trade.notional}} {{trade.currency}})"}}
