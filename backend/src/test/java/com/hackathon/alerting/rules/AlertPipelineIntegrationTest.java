@@ -8,6 +8,8 @@ import com.hackathon.alerting.delivery.repository.TeamRepository;
 import com.hackathon.alerting.ingest.envelope.EventEnvelope;
 import com.hackathon.alerting.ingest.model.SourceType;
 import com.hackathon.alerting.rules.model.Presentation;
+import com.hackathon.alerting.rules.cache.RoutingCache;
+import com.hackathon.alerting.rules.cache.RoutingTable;
 import com.hackathon.alerting.rules.model.Rule;
 import com.hackathon.alerting.rules.repository.RuleRepository;
 import com.hackathon.alerting.support.KafkaTestConfiguration;
@@ -38,6 +40,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,6 +84,9 @@ class AlertPipelineIntegrationTest {
     private ConfigChangedPublisher configChanged;
 
     @Autowired
+    private RoutingCache routing;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     @Autowired
@@ -95,7 +101,8 @@ class AlertPipelineIntegrationTest {
         team = new Team("Team " + desk);
         team.setCondition(json.readTree("{\"path\":\"desk\",\"op\":\"==\",\"value\":\"" + desk + "\"}"));
         team = teams.save(team);
-        configChanged.publish(ConfigKinds.TEAMS);
+        long teamId = team.getId();
+        publishAndAwait(ConfigKinds.TEAMS, table -> table.teams().stream().anyMatch(t -> t.teamId() == teamId));
     }
 
     // ------------------------------------------------------------------ processing
@@ -191,6 +198,8 @@ class AlertPipelineIntegrationTest {
         assertThat(rule.get("groupMode").asString()).isEqualTo("per_window");
         assertThat(rule.get("channels")).isEqualTo(json.readTree("[\"UI\"]"));
         long ruleId = rule.get("id").asLong();
+        // No re-publishing here: the API's own config-change notification must make the rule effective.
+        await().atMost(TIMEOUT).until(() -> hasRule(routing.current(), ruleId));
 
         send(event(Map.of("type", "BIG", "id", "T-1")));
 
@@ -265,8 +274,30 @@ class AlertPipelineIntegrationTest {
         Rule rule = new Rule(team, name);
         customizer.accept(rule);
         rule = rules.save(rule);
-        configChanged.publish(ConfigKinds.RULES);
+        long ruleId = rule.getId();
+        publishAndAwait(ConfigKinds.RULES, table -> hasRule(table, ruleId));
         return rule;
+    }
+
+    /**
+     * Announces a configuration change and waits until the routing table reflects it, so events sent afterwards are
+     * routed with the new configuration. Reloads arrive asynchronously over Redis Pub/Sub, and right after startup the
+     * subscription is still being made in the background, so a first message can be lost: while waiting, the change is
+     * re-announced (a reload is idempotent).
+     */
+    private void publishAndAwait(String kind, Predicate<RoutingTable> applied) {
+        configChanged.publish(kind);
+        await().atMost(TIMEOUT).pollInterval(Duration.ofMillis(250)).until(() -> {
+            if (applied.test(routing.current())) {
+                return true;
+            }
+            configChanged.publish(kind);
+            return false;
+        });
+    }
+
+    private static boolean hasRule(RoutingTable table, long ruleId) {
+        return table.teams().stream().flatMap(t -> t.rules().stream()).anyMatch(r -> r.id() == ruleId);
     }
 
     private EventEnvelope event(Map<String, Object> fields) {
