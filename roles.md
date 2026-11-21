@@ -22,7 +22,7 @@ Phase 1's split is in git history (`git show 36d19b8:roles.md`).
 | Delivery: routing by preferences and hours, outbox worker, retries, rate limit, simulator | done (Role 1) |
 | Processing: routing, fingerprint, dedup, grouping, auto-close, UNROUTED, live push, rules + alerts API | done (Role 2) |
 | Condition engine (all operators, strict / flexible), audit trail + `GET /api/alerts/{id}/audit` | done (Role 3) |
-| **Runbooks API** (CRUD, multipart upload, file download) | written on branch `role3/runbooks-api` — **needs a test fix before merging** (§8 task 0) |
+| **Runbooks API** (CRUD, multipart upload, file download, 413 over 10 MB) | done (Role 3) — branch `role3/runbooks-api`, fixed for today's `main` |
 | **Runbooks**: cache, selection (`RunbookService.attach` is still a no-op) | **phase 2 — Role 3** |
 | **Generator** `POST /api/dev/generate`, **k6 load test** | **phase 2 — Role 2** (moved from Role 3) |
 | **File source** (tail a log file), **seed data**, **smoke test**, **README / docs** | **phase 2 — Role 1** |
@@ -76,7 +76,7 @@ Edit only your part; announce changes in chat **before** merging (Role 4 regener
 1. **Branches**: `role1/…`, `role2/…`, `role3/…`; merge to `main` in small PRs, at least every ~2 hours; `main` always
    builds, starts and passes `mvn test`. **Before opening a PR, merge the current `main` into your branch and run
    `mvn test`** — git reports no conflict when another role removed or renamed a class you use, only the compiler does
-   (this happened to `role3/runbooks-api`, see §8 task 0).
+   (this happened to `role3/runbooks-api`: it referenced a class Role 1 had replaced).
 2. **Migrations**: never edit existing ones; new ones are timestamped — `V20261121_1430__runbooks_add_x.sql` — and only for
    your own tables.
 3. **Need something in another role's file** (a repository method, a property, a dependency)? Ask the owner in chat.
@@ -146,11 +146,9 @@ traffic generator, and make processing observable.
 
 ### Tasks, in order
 
-0. **Fix the flaky end-to-end test first** (it guards everybody's merges). Since config reloads go through Redis Pub/Sub,
-   they are asynchronous: `AlertPipelineIntegrationTest` creates a rule (or team) and sends events immediately, so an event
-   can be routed before `RoutingCache` reloaded — `ruleCreatedThroughTheApiTakesEffectWithoutRestart` timed out once in
-   review. After every configuration change the test must wait until the routing table contains the new rule/team
-   (e.g. `await().until(() -> routingCache.current()…)`) before sending events. Same for the `rule(…)` / `@BeforeEach` helpers.
+0. ~~**Fix the flaky end-to-end test**~~ — **done** (branch `role2/fix-config-reload-race`): config reloads arrive
+   asynchronously over Redis, so `AlertPipelineIntegrationTest` now waits until the routing table contains a new team/rule
+   before sending events. Do the same in any new integration test that changes configuration.
 1. **Generator** (`dev`) — `POST /api/dev/generate`, schemas `GenerateRequest` / `GenerateAccepted`.
    - The controller exists only when `alerting.dev.generator-enabled=true` (`@ConditionalOnProperty`); otherwise 404.
    - Unknown or inactive `source` (`SourceCache.findActive`) → 400. Answers 202 at once; generation runs in the background
@@ -198,16 +196,10 @@ to it in the UI card, the email and the audit trail.
 
 ### Tasks, in order
 
-0. **Finish `role3/runbooks-api` and merge it** — the API itself is done and matches the contract (CRUD, multipart upload
-   with file-name cleaning and condition validation, download with `Content-Type` from the extension, `RUNBOOKS`
-   reload). The branch was cut from `main` before Role 1's merge, so it does not compile against today's `main`:
-   - merge the current `main` into the branch;
-   - `RunbookCrudServiceTest` imports `LocalConfigChangedPublisher`, which Role 1 replaced by the Redis publisher. Replace it
-     with a small test `ConfigChangedPublisher` that publishes `ConfigChangedEvent` after commit (≈ 15 lines; verified in
-     review: all 9 runbooks tests then pass);
-   - add a test for an upload over 10 MB → 413 `application/problem+json` (not covered yet);
-   - optional: also strip Windows paths (`C:\x\file.pdf`) from file names — `StringUtils.getFilename` handles `/` only;
-   - `mvn test` green, then merge. The runbooks operations in `openapi.yaml` carry no `x-planned` marker any more.
+0. ~~**Finish `role3/runbooks-api`**~~ — **done**: `main` merged in, `RunbookCrudServiceTest` moved off the removed
+   `LocalConfigChangedPublisher`, new `RunbookUploadLimitTest` (over 10 MB → 413 problem+json on a real server; Tomcat
+   closes the connection after refusing a body, so clients get the status but maybe not the full body — the UI should
+   check the size before uploading). Still optional: strip Windows paths (`C:\x\file.pdf`) from file names.
 1. **Runbook cache** (`runbooks.cache`): `RunbookRepository.findAllSummaries()` (never `content`) + teams' strict flags
    (`TeamRepository`); compile each condition once (team runbook → the team's `strict`, global → flexible). Load before Kafka
    consumers start (`SmartInitializingSingleton`, like `RoutingCache`); reload on `RUNBOOKS` and `TEAMS`. A stored condition
@@ -252,7 +244,9 @@ email contains the download link, the audit shows `RUNBOOK_ATTACHED`, and the fi
 - **New endpoint** `GET /api/alerts/{id}/team-suggestions` for the unrouted page (`TeamSuggestion`).
 - **File sources**: the source form needs a `path` field for `type = file` (see `SourceInput.config`).
 - **`x-planned: true`** marks endpoints that are not live yet — keep their mocks; the marker disappears when the backend
-  ships them. The **runbooks API** is live as soon as `role3/runbooks-api` is merged.
+  ships them. The **runbooks API** is live as soon as `role3/runbooks-api` is merged. Check the file size (≤ 10 MB) in the
+  browser before uploading: for a too-large upload the server answers 413 but closes the connection, so the browser may
+  only see a network error.
 - The generator (`POST /api/dev/generate`) can back a "send test events" button on the simulator page.
 
 ---
@@ -261,7 +255,7 @@ email contains the download link, the audit shows `RUNBOOK_ATTACHED`, and the fi
 
 | When | On `main` |
 |---|---|
-| now | `role3/runbooks-api` fixed and merged (Role 3); flaky end-to-end test fixed (Role 2); then this branch |
+| now | merge `role3/runbooks-api`, `role2/fix-config-reload-race`, `phase2/roles` (any order — verified together: 104 tests green) |
 | ~3 h | runbook cache + selection (Role 3); generator (Role 2); file source (Role 1) |
 | ~6 h | seed + smoke pass on the compose stack; `burst.js` passes; contract test green with no `x-planned` left except bonuses |
 | final | demo dry run: fresh clone → compose → seed → UI scenario, twice in a row |
