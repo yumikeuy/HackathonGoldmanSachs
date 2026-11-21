@@ -22,6 +22,15 @@ spring:
       # Serialize JSONB columns with Jackson 3 (tools.jackson). Without this Hibernate prefers Jackson 2
       # whenever it is on the classpath transitively (e.g. in tests via kafka-server).
       hibernate.type.json_format_mapper: jackson3
+  mvc:
+    # Errors are returned as RFC 9457 problem+json (see common.web)
+    problemdetails:
+      enabled: true
+  servlet:
+    multipart:
+      # Runbook upload limit (AGENTS.md §4)
+      max-file-size: 10MB
+      max-request-size: 11MB
   flyway:
     locations: classpath:db/migration
     # New migrations are named by timestamp (V20261121_1430__rules_add_x.sql) so parallel branches
