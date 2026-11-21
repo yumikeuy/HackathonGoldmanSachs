@@ -1,5 +1,6 @@
 package com.hackathon.alerting.delivery.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.time.LocalTime;
@@ -15,7 +16,9 @@ import java.util.Objects;
  * @param days working days in ISO-8601 numbering: 1 = Monday … 7 = Sunday
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record WorkingHours(LocalTime from, LocalTime to, List<Integer> days) {
+public record WorkingHours(@JsonFormat(pattern = "HH:mm") LocalTime from,
+                           @JsonFormat(pattern = "HH:mm") LocalTime to,
+                           List<Integer> days) {
 
     public WorkingHours {
         Objects.requireNonNull(from, "from");

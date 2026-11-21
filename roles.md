@@ -43,9 +43,9 @@ their package) — the interface and the calling code do not change.
 | `common.json.TemplateRenderer` — `render("Rejected {{trade.id}}", event)` | Role 3 | `PlaceholderTemplateRenderer`: works, exact paths | Role 2 (alert titles), Role 1 (notification texts) |
 | `runbooks.RunbookService` — `attach(Alert, JsonNode event)` | Role 3 | `DefaultRunbookService`: does nothing | Role 2 (`AlertCreator`) |
 | `runbooks.audit.AuditService` — `log(Long alertId, String actor, String actionType, JsonNode details)` | Role 3 | `DefaultAuditService`: logs only | everyone |
-| `delivery.outbox.OutboxService` — `enqueue(Alert, Rule)` | Role 1 | `DefaultOutboxService`: one UI row | Role 2 (`AlertCreator`) |
-| `common.config.ConfigChangedPublisher` — `publish(String what)` | Role 1 | `LocalConfigChangedPublisher`: local Spring event after commit | everyone with CRUD |
-| `ingest.recent.RecentEvents` — `add(event)`, `latest(limit)` | Role 1 | `InMemoryRecentEvents`: in-memory, 1000 | Role 2 (dry-run) |
+| `delivery.outbox.OutboxService` — `enqueue(Alert, Rule)` | Role 1 | **done**: `DefaultOutboxService` — UI row + one personal row per active user, channel by preferences / working hours / time zone | Role 2 (`AlertCreator`) |
+| `common.config.ConfigChangedPublisher` — `publish(String what)` | Role 1 | **done**: `RedisConfigChangedPublisher` — Redis `config.changed` after commit, `ConfigChangedSubscriber` re-publishes locally on every instance | everyone with CRUD |
+| `ingest.recent.RecentEvents` — `add(event)`, `latest(limit)` | Role 1 | **done**: `RedisRecentEvents` — `recent:events`, 1000 | Role 2 (dry-run) |
 
 Listening for configuration changes (all caches):
 
