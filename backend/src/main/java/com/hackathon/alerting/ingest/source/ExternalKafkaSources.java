@@ -15,10 +15,6 @@ import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.MessageListener;
 import org.springframework.stereotype.Component;
 import org.springframework.util.backoff.FixedBackOff;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.JsonNodeFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -30,7 +26,7 @@ import java.util.Objects;
  *
  * <p>One listener container per source, consumer group {@code alerting-source-{name}}. Containers are
  * rebuilt whenever the source list is reloaded: added sources start, removed/deactivated ones stop, a changed
- * topic restarts. A message is committed only after {@code events.ingest} acknowledged it; if Kafka refuses,
+ * topic restarts. Values are parsed by {@link PayloadParser} (size and depth limits). A message is committed only after {@code events.ingest} acknowledged it; if Kafka refuses,
  * the message is retried every 5 s, so nothing is lost. A value that is not JSON is ingested as a JSON string.
  */
 @Component
@@ -42,15 +38,15 @@ public class ExternalKafkaSources implements SmartLifecycle {
 
     private final ConsumerFactory<String, String> consumerFactory;
     private final EventIngestor ingestor;
-    private final JsonMapper json;
+    private final PayloadParser parser;
     private final Map<String, Running> running = new HashMap<>();
     private volatile boolean started;
 
     @SuppressWarnings("unchecked")
-    public ExternalKafkaSources(ConsumerFactory<?, ?> consumerFactory, EventIngestor ingestor, JsonMapper json) {
+    public ExternalKafkaSources(ConsumerFactory<?, ?> consumerFactory, EventIngestor ingestor, PayloadParser parser) {
         this.consumerFactory = (ConsumerFactory<String, String>) consumerFactory;
         this.ingestor = ingestor;
-        this.json = json;
+        this.parser = parser;
     }
 
     @EventListener
@@ -92,18 +88,7 @@ public class ExternalKafkaSources implements SmartLifecycle {
     }
 
     void forward(String sourceName, ConsumerRecord<String, String> record) {
-        ingestor.ingest(SourceType.KAFKA, sourceName, parse(record.value()));
-    }
-
-    private JsonNode parse(String value) {
-        if (value == null) {
-            return JsonNodeFactory.instance.nullNode();
-        }
-        try {
-            return json.readTree(value);
-        } catch (JacksonException e) {
-            return JsonNodeFactory.instance.stringNode(value);
-        }
+        ingestor.ingest(SourceType.KAFKA, sourceName, parser.parseOrText(record.value()));
     }
 
     @Override

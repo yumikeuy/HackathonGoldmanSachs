@@ -24,8 +24,11 @@ no restart. Validation: a `kafka` source needs `config.topic`, a `file` source `
 | Answer | When |
 |---|---|
 | **202** `{"eventId", "ingestedAt"}` | Kafka acknowledged the event (`acks=all`) — it will be processed |
-| 400 | the body is not JSON |
+| 400 | the body is not JSON, or nested deeper than 64 levels |
+| 401 | the source has an API key and `X-Api-Key` is missing or wrong ([security.md](security.md)) |
 | 404 | unknown or inactive source |
+| 413 | body larger than 1 MB |
+| 429 | the source sends more than 1000 events per second (`Retry-After: 1`) |
 | 503 | Kafka did not acknowledge within `alerting.ingest.send-timeout` (5 s) — retry later |
 
 The server stamps `ingested_at`; that is the event time.
@@ -145,7 +148,7 @@ every message is delivered — none lost. Switches are per instance and reset on
 | Metric | Tags | Meaning |
 |---|---|---|
 | `alerting.ingest.accepted` | `source_type` | events acknowledged by Kafka |
-| `alerting.ingest.rejected` | `reason` = `invalid_json` / `unknown_source` / `kafka_unavailable` | events refused |
+| `alerting.ingest.rejected` | `reason` = `invalid_json` / `unknown_source` / `unauthorized` / `rate_limited` / `too_large` / `kafka_unavailable` | events refused |
 | `alerting.delivery.sent` | `channel` | notifications delivered |
 | `alerting.delivery.retried` | `channel` | failed attempts scheduled for retry |
 | `alerting.delivery.failed` | `channel` | notifications given up after all retries |

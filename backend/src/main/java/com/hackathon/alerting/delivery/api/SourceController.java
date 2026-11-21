@@ -8,6 +8,7 @@ import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.ingest.model.Source;
 import com.hackathon.alerting.ingest.model.SourceType;
 import com.hackathon.alerting.ingest.repository.SourceRepository;
+import com.hackathon.alerting.ingest.source.SourceKeys;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -26,6 +27,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.util.List;
@@ -35,6 +38,9 @@ import java.util.List;
  * source needs {@code config.topic}, a {@code file} source {@code config.path}. Every change is published as
  * {@link ConfigKinds#SOURCES}, which reloads the source cache, the external Kafka listeners and the file tailers
  * on all instances.
+ *
+ * <p>An HTTP source can require an API key ({@code POST/DELETE /api/sources/{id}/api-key}); only its SHA-256 is stored
+ * in {@code config}, and it is never returned (docs/security.md).
  */
 @RestController
 @RequestMapping("/api/sources")
@@ -68,7 +74,7 @@ public class SourceController {
         if (sources.existsByName(input.name())) {
             throw new ConflictException("Source '" + input.name() + "' already exists");
         }
-        Source source = new Source(input.name(), input.type(), input.config());
+        Source source = new Source(input.name(), input.type(), SourceKeys.withoutSecrets(input.config()));
         source.setActive(input.active() == null || input.active());
         return save(source);
     }
@@ -82,7 +88,7 @@ public class SourceController {
         }
         source.setName(input.name());
         source.setType(input.type());
-        source.setConfig(input.config());
+        source.setConfig(keepApiKey(source.getConfig(), input.config()));
         source.setActive(input.active() == null || input.active());
         return save(source);
     }
@@ -92,6 +98,45 @@ public class SourceController {
     public void delete(@PathVariable long id) {
         sources.delete(find(id));
         configChanged.publish(ConfigKinds.SOURCES);
+    }
+
+    /**
+     * Generates a new API key for an HTTP source; from now on {@code POST /api/ingest/{name}} requires it in
+     * {@code X-Api-Key}. The key is returned only here — the database keeps its SHA-256. Calling again rotates the key.
+     */
+    @PostMapping("/{id}/api-key")
+    @ResponseStatus(HttpStatus.CREATED)
+    public SourceApiKey createApiKey(@PathVariable long id) {
+        Source source = find(id);
+        if (source.getType() != SourceType.HTTP) {
+            throw new InvalidRequestException("API keys apply to http sources only");
+        }
+        String key = SourceKeys.generate();
+        ObjectNode config = source.getConfig().isObject() ? ((ObjectNode) source.getConfig()).deepCopy() : JsonNodeFactory.instance.objectNode();
+        config.put(SourceKeys.HASH_FIELD, SourceKeys.hash(key));
+        source.setConfig(config);
+        save(source);
+        return new SourceApiKey(source.getName(), key, SourceKeys.HEADER);
+    }
+
+    /** Removes the API key: the source accepts events without a key again. */
+    @DeleteMapping("/{id}/api-key")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteApiKey(@PathVariable long id) {
+        Source source = find(id);
+        source.setConfig(SourceKeys.withoutSecrets(source.getConfig()));
+        save(source);
+    }
+
+    /** PUT replaces the config but must not silently drop (or let the client set) the key hash. */
+    private static JsonNode keepApiKey(JsonNode current, JsonNode input) {
+        JsonNode next = SourceKeys.withoutSecrets(input);
+        if (!SourceKeys.isRequired(current)) {
+            return next;
+        }
+        ObjectNode merged = next != null && next.isObject() ? ((ObjectNode) next).deepCopy() : JsonNodeFactory.instance.objectNode();
+        merged.set(SourceKeys.HASH_FIELD, current.get(SourceKeys.HASH_FIELD));
+        return merged;
     }
 
     private SourceDto save(Source source) {
@@ -135,12 +180,18 @@ public class SourceController {
             Boolean active) {
     }
 
-    /** {@code Source} of openapi.yaml. */
-    public record SourceDto(long id, String name, SourceType type, JsonNode config, boolean active, Instant createdAt) {
+    /** {@code Source} of openapi.yaml; the API key hash is never returned, only whether a key is required. */
+    public record SourceDto(long id, String name, SourceType type, JsonNode config, boolean active, boolean apiKeyRequired,
+                            Instant createdAt) {
 
         static SourceDto from(Source source) {
-            return new SourceDto(source.getId(), source.getName(), source.getType(), source.getConfig(), source.isActive(),
-                    source.getCreatedAt());
+            return new SourceDto(source.getId(), source.getName(), source.getType(),
+                    SourceKeys.withoutSecrets(source.getConfig()), source.isActive(),
+                    SourceKeys.isRequired(source.getConfig()), source.getCreatedAt());
         }
+    }
+
+    /** {@code SourceApiKey} of openapi.yaml — shown once. */
+    public record SourceApiKey(String sourceName, String apiKey, String header) {
     }
 }

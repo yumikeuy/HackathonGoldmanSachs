@@ -47,6 +47,7 @@ Then watch the alerts in the UI (or `GET /api/alerts`) and the notifications in 
 |---|---|---|
 | Ingest, sources, delivery, simulator | [docs/ingest-delivery.md](docs/ingest-delivery.md) | Role 1 |
 | Running, configuration, seed, smoke, metrics, troubleshooting | [docs/operations.md](docs/operations.md) | Role 1 |
+| Security: threat model, source API keys, safe downloads, limits | [docs/security.md](docs/security.md) | Role 1 |
 | Event processing, deduplication, alerts | [docs/processing.md](docs/processing.md) | Role 2 |
 | Event generator and load testing | [docs/load-testing.md](docs/load-testing.md) | Role 2 |
 | Condition language | [docs/conditions.md](docs/conditions.md) | Role 3 |
