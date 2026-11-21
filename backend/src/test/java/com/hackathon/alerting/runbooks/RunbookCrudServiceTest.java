@@ -3,7 +3,7 @@ package com.hackathon.alerting.runbooks;
 import com.hackathon.alerting.common.condition.DefaultConditionCompiler;
 import com.hackathon.alerting.common.config.ConfigChangedEvent;
 import com.hackathon.alerting.common.config.ConfigKinds;
-import com.hackathon.alerting.common.config.LocalConfigChangedPublisher;
+import com.hackathon.alerting.common.config.ConfigChangedPublisher;
 import com.hackathon.alerting.common.json.ExactPathFieldLocator;
 import com.hackathon.alerting.common.web.InvalidRequestException;
 import com.hackathon.alerting.common.web.NotFoundException;
@@ -21,12 +21,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
@@ -42,10 +45,38 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         RunbookCrudService.class,
         DefaultConditionCompiler.class,
         ExactPathFieldLocator.class,
-        LocalConfigChangedPublisher.class,
+        RunbookCrudServiceTest.AfterCommitConfigChangedPublisher.class,
         RunbookCrudServiceTest.JsonConfig.class
 })
 class RunbookCrudServiceTest {
+
+    /**
+     * Stand-in for the Redis publisher: delivers {@link ConfigChangedEvent} locally, after the transaction commits —
+     * the guarantee of the {@link ConfigChangedPublisher} contract this test checks — without needing Redis.
+     */
+    static class AfterCommitConfigChangedPublisher implements ConfigChangedPublisher {
+
+        private final ApplicationEventPublisher events;
+
+        AfterCommitConfigChangedPublisher(ApplicationEventPublisher events) {
+            this.events = events;
+        }
+
+        @Override
+        public void publish(String what) {
+            ConfigChangedEvent event = new ConfigChangedEvent(what);
+            if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+                events.publishEvent(event);
+                return;
+            }
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    events.publishEvent(event);
+                }
+            });
+        }
+    }
 
     @TestConfiguration(proxyBeanMethods = false)
     static class JsonConfig {
