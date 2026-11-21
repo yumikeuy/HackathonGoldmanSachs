@@ -1,0 +1,1 @@
+{"name": "workflow-events", "type": "kafka", "config": {"topic": "workflow.events"}}

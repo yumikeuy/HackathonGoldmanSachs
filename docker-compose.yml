@@ -56,6 +56,9 @@ services:
       REDIS_HOST: redis
       MAIL_HOST: mailhog
       PUBLIC_URL: http://localhost:8080
+    volumes:
+      # File sources tail files here: a source with {"path": "/data/logs/app.log"} reads ./infra/logs/app.log
+      - ./infra/logs:/data/logs
     depends_on:
       postgres: { condition: service_healthy }
       kafka: { condition: service_healthy }

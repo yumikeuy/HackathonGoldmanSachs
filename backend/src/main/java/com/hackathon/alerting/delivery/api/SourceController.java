@@ -32,8 +32,9 @@ import java.util.List;
 
 /**
  * CRUD {@code /api/sources}. The name is the URL segment of {@code POST /api/ingest/{source}}; a {@code kafka}
- * source needs {@code config.topic}. Every change is published as {@link ConfigKinds#SOURCES}, which reloads the
- * source cache and the external Kafka listeners on all instances.
+ * source needs {@code config.topic}, a {@code file} source {@code config.path}. Every change is published as
+ * {@link ConfigKinds#SOURCES}, which reloads the source cache, the external Kafka listeners and the file tailers
+ * on all instances.
  */
 @RestController
 @RequestMapping("/api/sources")
@@ -115,6 +116,12 @@ public class SourceController {
             JsonNode topic = input.config() == null ? null : input.config().get("topic");
             if (topic == null || !topic.isString() || topic.asString().isBlank()) {
                 throw new InvalidRequestException("A kafka source needs config.topic");
+            }
+        }
+        if (input.type() == SourceType.FILE) {
+            JsonNode path = input.config() == null ? null : input.config().get("path");
+            if (path == null || !path.isString() || path.asString().isBlank()) {
+                throw new InvalidRequestException("A file source needs config.path");
             }
         }
     }

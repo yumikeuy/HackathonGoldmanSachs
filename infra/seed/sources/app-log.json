@@ -1,0 +1,1 @@
+{"name": "app-log", "type": "file", "config": {"path": "/data/logs/app.log"}}

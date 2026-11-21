@@ -1,0 +1,5 @@
+{"name": "Team Pricing",
+ "condition": {"or": [
+   {"path": "team", "op": "==", "value": "pricing"},
+   {"path": "workflow", "op": "glob", "value": "*-pricing"}
+ ]}}

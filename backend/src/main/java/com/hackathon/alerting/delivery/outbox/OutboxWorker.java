@@ -2,12 +2,15 @@ package com.hackathon.alerting.delivery.outbox;
 
 import com.hackathon.alerting.common.config.WebSocketTopics;
 import com.hackathon.alerting.delivery.model.Channel;
+import com.hackathon.alerting.delivery.model.OutboxStatus;
 import com.hackathon.alerting.delivery.model.OutboxTask;
 import com.hackathon.alerting.delivery.provider.NotificationProvider;
 import com.hackathon.alerting.delivery.ratelimit.RateLimiter;
 import com.hackathon.alerting.delivery.simulator.ChannelSwitchboard;
 import com.hackathon.alerting.delivery.simulator.Delivery;
 import com.hackathon.alerting.delivery.repository.OutboxTaskRepository;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -41,9 +44,16 @@ import java.util.Map;
  *       rows wait for the window to reset (no retry counted).</li>
  * </ul>
  * Every attempt is pushed to {@code /topic/simulator} after the commit.
+ *
+ * <p>Metrics (tag {@code channel}): {@value #SENT}, {@value #RETRIED}, {@value #FAILED}; gauge {@value #PENDING}.
  */
 @Component
 public class OutboxWorker {
+
+    public static final String SENT = "alerting.delivery.sent";
+    public static final String RETRIED = "alerting.delivery.retried";
+    public static final String FAILED = "alerting.delivery.failed";
+    public static final String PENDING = "alerting.delivery.pending";
 
     static final int BATCH_SIZE = 100;
     static final List<Duration> RETRY_DELAYS = List.of(
@@ -59,9 +69,11 @@ public class OutboxWorker {
     private final SimpMessagingTemplate websocket;
     private final TransactionTemplate transaction;
     private final Clock clock;
+    private final MeterRegistry metrics;
 
     public OutboxWorker(OutboxTaskRepository outbox, List<NotificationProvider> providers, ChannelSwitchboard switchboard,
-                        RateLimiter rateLimiter, SimpMessagingTemplate websocket, TransactionTemplate transaction, Clock clock) {
+                        RateLimiter rateLimiter, SimpMessagingTemplate websocket, TransactionTemplate transaction, Clock clock,
+                        MeterRegistry metrics) {
         this.outbox = outbox;
         providers.forEach(provider -> this.providers.put(provider.channel(), provider));
         this.switchboard = switchboard;
@@ -69,6 +81,10 @@ public class OutboxWorker {
         this.websocket = websocket;
         this.transaction = transaction;
         this.clock = clock;
+        this.metrics = metrics;
+        Gauge.builder(PENDING, outbox, repository -> repository.countByStatus(OutboxStatus.PENDING))
+                .description("Notifications waiting to be sent or retried")
+                .register(metrics);
     }
 
     @Scheduled(fixedDelayString = "${alerting.outbox.poll-interval:500ms}")
@@ -139,7 +155,7 @@ public class OutboxWorker {
                     merged.put("mergedInto", carrier.getId());
                     task.setPayload(merged);
                 }
-                task.markSent(now);
+                markSent(task, now);
             } else {
                 fail(task, error, now);
             }
@@ -172,7 +188,7 @@ public class OutboxWorker {
     private void attempt(OutboxTask task, JsonNode payload, Instant now) {
         String error = trySend(task, payload);
         if (error == null) {
-            task.markSent(now);
+            markSent(task, now);
         } else {
             fail(task, error, now);
         }
@@ -195,12 +211,19 @@ public class OutboxWorker {
         }
     }
 
+    private void markSent(OutboxTask task, Instant now) {
+        task.markSent(now);
+        metrics.counter(SENT, "channel", task.getChannel().name()).increment();
+    }
+
     private void fail(OutboxTask task, String error, Instant now) {
         String message = error.length() > MAX_ERROR_LENGTH ? error.substring(0, MAX_ERROR_LENGTH) : error;
         if (task.getRetryCount() < RETRY_DELAYS.size()) {
             task.scheduleRetry(message, now.plus(RETRY_DELAYS.get(task.getRetryCount())));
+            metrics.counter(RETRIED, "channel", task.getChannel().name()).increment();
         } else {
             task.markFailed(message);
+            metrics.counter(FAILED, "channel", task.getChannel().name()).increment();
             log.warn("Delivery {} over {} failed permanently: {}", task.getId(), task.getChannel(), message);
         }
     }
