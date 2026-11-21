@@ -6,6 +6,8 @@ import com.hackathon.alerting.common.web.InvalidRequestException;
 import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.rules.cache.RuleRoute;
 import com.hackathon.alerting.rules.dedup.DedupStore;
+import com.hackathon.alerting.rules.metrics.ProcessingMetrics;
+import com.hackathon.alerting.rules.metrics.ProcessingMetrics.ResolvedBy;
 import com.hackathon.alerting.rules.model.Alert;
 import com.hackathon.alerting.rules.model.AlertStatus;
 import com.hackathon.alerting.rules.push.AlertPublisher;
@@ -19,6 +21,7 @@ import org.springframework.data.domain.Window;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Optional;
@@ -39,9 +42,11 @@ public class AlertService {
     private final AlertPublisher publisher;
     private final TransactionTemplate tx;
     private final TransactionTemplate readOnlyTx;
+    private final ProcessingMetrics metrics;
+    private final Clock clock;
 
     public AlertService(AlertRepository alerts, AuditService audit, DedupStore dedup, AlertPublisher publisher,
-                        TransactionTemplate transactionTemplate) {
+                        TransactionTemplate transactionTemplate, ProcessingMetrics metrics, Clock clock) {
         this.alerts = alerts;
         this.audit = audit;
         this.dedup = dedup;
@@ -49,6 +54,8 @@ public class AlertService {
         this.tx = transactionTemplate;
         this.readOnlyTx = new TransactionTemplate(transactionTemplate.getTransactionManager());
         this.readOnlyTx.setReadOnly(true);
+        this.metrics = metrics;
+        this.clock = clock;
     }
 
     /**
@@ -120,13 +127,14 @@ public class AlertService {
     public AlertDetail resolve(long id, String actor) {
         Change change = tx.execute(status -> {
             Alert alert = load(id);
-            boolean changed = alert.resolve(Instant.now());
+            boolean changed = alert.resolve(clock.instant());
             if (changed) {
                 audit.log(id, actor, AuditActions.RESOLVE, null);
             }
             return new Change(AlertDetail.from(alert), changed, alert.getFingerprint());
         });
         if (change.changed()) {
+            metrics.alertResolved(ResolvedBy.USER);
             afterResolved(change);
         }
         return change.detail();
@@ -152,6 +160,7 @@ public class AlertService {
         if (change == null) {
             return Optional.empty();
         }
+        metrics.alertResolved(ResolvedBy.RULE);
         afterResolved(change);
         return Optional.of(change.detail().summary());
     }

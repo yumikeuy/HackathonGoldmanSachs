@@ -1,0 +1,13 @@
+{
+  "type": "TRADE_REJECTED",
+  "desk": "rates",
+  "instrument": "EUR-IRS-10Y",
+  "trade": {
+    "id": "T-1001",
+    "notional": "15000000",
+    "currency": "EUR",
+    "counterparty": "ACME Bank"
+  },
+  "reason": "Credit limit exceeded",
+  "timestamp": "2026-11-21T00:17:03Z"
+}

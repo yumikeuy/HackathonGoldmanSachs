@@ -18,6 +18,7 @@ import com.hackathon.alerting.support.MutableClock;
 import com.hackathon.alerting.support.PostgresTestConfiguration;
 import com.hackathon.alerting.support.RedisTestConfiguration;
 import com.hackathon.alerting.support.TestData;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -88,6 +89,8 @@ class DeliveryIntegrationTest {
     private UserDirectory userDirectory;
     @Autowired
     private TransactionTemplate transaction;
+    @Autowired
+    private MeterRegistry meters;
     @MockitoBean
     private JavaMailSender mailSender;
 
@@ -116,6 +119,8 @@ class DeliveryIntegrationTest {
         toggle(Channel.SMS);   // up again
         worker.run();
         assertThat(row(alertId, Channel.SMS).getStatus()).isEqualTo(OutboxStatus.SENT);
+        assertThat(meters.counter(OutboxWorker.RETRIED, "channel", "SMS").count()).isGreaterThanOrEqualTo(1);
+        assertThat(meters.counter(OutboxWorker.SENT, "channel", "SMS").count()).isGreaterThanOrEqualTo(1);
 
         JsonNode page = http().get().uri("/api/simulator/deliveries?limit=200").retrieve().body(JsonNode.class);
         assertThat(page.get("items").findValuesAsString("status")).isNotEmpty();

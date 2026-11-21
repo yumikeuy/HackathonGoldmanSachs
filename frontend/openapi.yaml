@@ -543,7 +543,6 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
       tags: [alerts]
-      x-planned: true
       summary: Teams an UNROUTED alert probably belongs to, best first (Role 2)
       description: |
         Helps triage on the unrouted page ("create rule from this event"): ranks teams by how close the
@@ -646,8 +645,12 @@ paths:
   /api/dev/generate:
     post:
       tags: [dev]
-      x-planned: true
       summary: Generate test events through the normal ingest path
+      description: |
+        Answers 202 at once; events are sent in the background at `ratePerSecond` through the real ingest path
+        (Kafka, recent events, field catalog) — they behave exactly like events posted to `/api/ingest/{source}`.
+        At most 4 runs at a time. The endpoint exists only while `alerting.dev.generator-enabled=true`
+        (env `DEV_GENERATOR_ENABLED`); otherwise 404.
       requestBody:
         required: true
         content:
@@ -660,6 +663,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/GenerateAccepted' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: 4 generations are already running — try again later
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
 components:
   parameters:
@@ -1154,11 +1162,25 @@ components:
       type: object
       required: [source]
       properties:
-        source: { type: string, description: Source name to ingest under. }
+        source: { type: string, description: Name of an active source to ingest under (else 400). }
         count: { type: integer, minimum: 1, maximum: 100000, default: 100 }
-        ratePerSecond: { type: integer, minimum: 1, default: 100 }
+        ratePerSecond: { type: integer, minimum: 1, maximum: 1000, default: 100 }
         template:
-          description: Event to send (fields may vary per generator rules); omit for built-in samples.
+          description: |
+            Event to send; omit to cycle through the built-in sample events. String values (at any depth; keys are
+            never changed) may contain placeholders, so events vary:
+            - `{{seq}}` — number of the event in the run: 1, 2, 3 …
+            - `{{uuid}}` — a random UUID
+            - `{{now}}` — current time, ISO-8601 UTC
+            - `{{randInt:MIN:MAX}}` — random integer, bounds inclusive
+            - `{{oneOf:A|B|C}}` — one of the listed values
+            A string that is exactly `{{seq}}` or `{{randInt:…}}` becomes a JSON number. Unknown or malformed
+            placeholders → 400.
+          example:
+            type: TRADE_REJECTED
+            desk: rates
+            instrument: '{{oneOf:EUR-IRS-10Y|USD-IRS-5Y}}'
+            trade: { id: 'T-{{seq}}', notional: '{{randInt:1000000:50000000}}' }
     GenerateAccepted:
       type: object
       required: [count]

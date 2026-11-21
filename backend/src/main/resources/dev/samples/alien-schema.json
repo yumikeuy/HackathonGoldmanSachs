@@ -1,0 +1,17 @@
+{
+  "Header": {
+    "MsgType": "DealException",
+    "Origin": "legacy-fx-gateway"
+  },
+  "Body": {
+    "Deal": {
+      "Ref": "FX-778",
+      "Economics": {
+        "Notional": 25000000,
+        "Ccy": "USD"
+      }
+    },
+    "Severity": "Major",
+    "Text": "Settlement instructions missing"
+  }
+}

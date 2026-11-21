@@ -82,6 +82,9 @@ alerting:
   ingest:
     # How long POST /api/ingest waits for the Kafka acknowledgement before answering 503
     send-timeout: 5s
+  file-source:
+    # How often file sources (type "file") check their file for new lines
+    poll-interval: 500ms
   outbox:
     poll-interval: 500ms
     cleanup-cron: "0 0 * * * *"

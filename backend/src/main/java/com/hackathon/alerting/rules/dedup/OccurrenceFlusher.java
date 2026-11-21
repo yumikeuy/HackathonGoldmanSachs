@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -34,11 +35,13 @@ public class OccurrenceFlusher {
     private final DedupStore dedup;
     private final AlertRepository alerts;
     private final AlertPublisher publisher;
+    private final Clock clock;
 
-    public OccurrenceFlusher(DedupStore dedup, AlertRepository alerts, AlertPublisher publisher) {
+    public OccurrenceFlusher(DedupStore dedup, AlertRepository alerts, AlertPublisher publisher, Clock clock) {
         this.dedup = dedup;
         this.alerts = alerts;
         this.publisher = publisher;
+        this.clock = clock;
     }
 
     @Scheduled(fixedDelay = 1000, initialDelay = 1000)
@@ -60,7 +63,7 @@ public class OccurrenceFlusher {
         if (fingerprints.isEmpty()) {
             return 0;
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Map<Long, Long> countsByAlert = new HashMap<>();
         for (String fingerprint : fingerprints) {
             OptionalLong alertId = resolveAlert(fingerprint);

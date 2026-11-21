@@ -7,8 +7,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 
 /**
  * Hourly cleanup (AGENTS.md §6): deletes alerts resolved more than {@link #RETENTION} ago; their outbox rows
@@ -21,15 +21,17 @@ public class AlertCleanup {
     static final Duration RETENTION = Duration.ofDays(7);
 
     private final AlertRepository alerts;
+    private final Clock clock;
 
-    public AlertCleanup(AlertRepository alerts) {
+    public AlertCleanup(AlertRepository alerts, Clock clock) {
         this.alerts = alerts;
+        this.clock = clock;
     }
 
     @Scheduled(fixedDelayString = "PT1H", initialDelayString = "PT5M")
     @Transactional
     public void deleteOldResolvedAlerts() {
-        int deleted = alerts.deleteResolvedBefore(Instant.now().minus(RETENTION));
+        int deleted = alerts.deleteResolvedBefore(clock.instant().minus(RETENTION));
         if (deleted > 0) {
             log.info("Deleted {} alerts resolved more than {} ago", deleted, RETENTION);
         }
