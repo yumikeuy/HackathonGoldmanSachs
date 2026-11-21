@@ -60,6 +60,15 @@ class ExactPathFieldLocatorTest {
                 .hasValueSatisfying(n -> assertThat(n.asString()).isEqualTo("A1"));
     }
 
+    @Test
+    void explicitNullAtExactPathDoesNotFallBackToSameKeyElsewhere() {
+        JsonNode event = JSON.readTree("{\"trade\":{\"notional\":null},\"other\":{\"notional\":999}}");
+
+        assertThat(locator.find(event, "trade.notional", false)).isEmpty();
+        assertThat(locator.find(event, "deal.notional", false))
+                .hasValueSatisfying(n -> assertThat(n.intValue()).isEqualTo(999));
+    }
+
     private static JsonNode loadFixture(String resourcePath) throws IOException {
         try (InputStream in = ExactPathFieldLocatorTest.class.getClassLoader().getResourceAsStream(resourcePath)) {
             assertThat(in).as(resourcePath).isNotNull();

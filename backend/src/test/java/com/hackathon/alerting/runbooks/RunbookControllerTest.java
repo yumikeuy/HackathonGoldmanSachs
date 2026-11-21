@@ -98,10 +98,16 @@ class RunbookControllerTest {
     @Test
     void downloadDerivesContentTypeFromFileExtension() throws Exception {
         byte[] pdfBytes = "%PDF-1.4".getBytes(StandardCharsets.UTF_8);
+        byte[] mdBytes = "# Runbook".getBytes(StandardCharsets.UTF_8);
+        byte[] yamlBytes = "runbook: cpu".getBytes(StandardCharsets.UTF_8);
         byte[] customBytes = "custom binary".getBytes(StandardCharsets.UTF_8);
         when(runbooks.downloadFile(1L)).thenReturn(new RunbookFile("restart-workflow.pdf", pdfBytes));
         when(runbooks.downloadFile(2L)).thenReturn(new RunbookFile("notes.txt", "hello".getBytes(StandardCharsets.UTF_8)));
         when(runbooks.downloadFile(3L)).thenReturn(new RunbookFile("guide.runbookxyz", customBytes));
+        when(runbooks.downloadFile(4L)).thenReturn(new RunbookFile("trade-rejection.md", mdBytes));
+        when(runbooks.downloadFile(5L)).thenReturn(new RunbookFile("GUIDE.MARKDOWN", mdBytes));
+        when(runbooks.downloadFile(6L)).thenReturn(new RunbookFile("high-cpu.yaml", yamlBytes));
+        when(runbooks.downloadFile(7L)).thenReturn(new RunbookFile("alerts.yml", yamlBytes));
 
         mockMvc.perform(get("/api/runbooks/1/file"))
                 .andExpect(status().isOk())
@@ -118,6 +124,24 @@ class RunbookControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.APPLICATION_OCTET_STREAM))
                 .andExpect(content().bytes(customBytes));
+
+        mockMvc.perform(get("/api/runbooks/4/file"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.TEXT_MARKDOWN))
+                .andExpect(content().bytes(mdBytes));
+
+        mockMvc.perform(get("/api/runbooks/5/file"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.TEXT_MARKDOWN));
+
+        mockMvc.perform(get("/api/runbooks/6/file"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_YAML))
+                .andExpect(content().bytes(yamlBytes));
+
+        mockMvc.perform(get("/api/runbooks/7/file"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_YAML));
     }
 
     @Test

@@ -77,7 +77,9 @@ class DefaultConditionCompilerTest {
         assertThat(compiler.compile(json("{\"path\":\"host\",\"op\":\"glob\",\"value\":\"staging-*\"}"), true).test(event)).isFalse();
 
         assertThat(compiler.compile(json("{\"path\":\"status\",\"op\":\"exists\",\"value\":true}"), true).test(event)).isTrue();
+        assertThat(compiler.compile(json("{\"path\":\"status\",\"op\":\"exists\"}"), true).test(event)).isTrue();
         assertThat(compiler.compile(json("{\"path\":\"nullable\",\"op\":\"exists\",\"value\":true}"), true).test(event)).isFalse();
+        assertThat(compiler.compile(json("{\"path\":\"nullable\",\"op\":\"exists\",\"value\":false}"), true).test(event)).isTrue();
         assertThat(compiler.compile(json("{\"path\":\"missing\",\"op\":\"exists\",\"value\":false}"), true).test(event)).isTrue();
     }
 
@@ -170,6 +172,27 @@ class DefaultConditionCompilerTest {
         assertThatThrownBy(() -> compiler.compile(json("{\"and\":[],\"or\":[]}"), false))
                 .isInstanceOf(InvalidConditionException.class);
 
+        assertThatThrownBy(() -> compiler.compile(json("{\"and\":[],\"extra\":1}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("'and'")
+                .hasMessageContaining("must not have other properties");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"or\":[],\"extra\":1}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("'or'")
+                .hasMessageContaining("must not have other properties");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"status\",\"op\":\"exists\",\"vaule\":false}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("Unknown property 'vaule'")
+                .hasMessageContaining("$");
+
+        assertThatThrownBy(() -> compiler.compile(
+                json("{\"and\":[{\"path\":\"a\",\"op\":\"==\",\"value\":1},{\"path\":\"b\",\"op\":\"==\",\"value\":2,\"extra\":true}]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("Unknown property 'extra'")
+                .hasMessageContaining("$.and[1]");
+
         assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"a\"}"), false))
                 .isInstanceOf(InvalidConditionException.class);
 
@@ -190,6 +213,34 @@ class DefaultConditionCompilerTest {
 
         assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"a\",\"op\":\"==\",\"value\":null}"), false))
                 .isInstanceOf(InvalidConditionException.class);
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"and\":[]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("must not be empty");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"or\":[]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("must not be empty");
+
+        for (String badPath : new String[]{".notional", "trade.", "trade..notional", " trade.id "}) {
+            assertThatThrownBy(() -> compiler.compile(
+                    json("{\"path\":\"" + badPath + "\",\"op\":\"==\",\"value\":1}"), false))
+                    .as("bad path: '%s'", badPath)
+                    .isInstanceOf(InvalidConditionException.class)
+                    .hasMessageContaining("Invalid path");
+        }
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"value\",\"op\":\">\",\"value\":\"90\"}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("numeric 'value'");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"metric\",\"op\":\"in\",\"value\":[]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("non-empty array");
+
+        assertThatThrownBy(() -> compiler.compile(json("{\"path\":\"metric\",\"op\":\"not_in\",\"value\":[\"cpu\",null]}"), false))
+                .isInstanceOf(InvalidConditionException.class)
+                .hasMessageContaining("null elements");
     }
 
     private static JsonNode loadFixture(String resourcePath) throws IOException {

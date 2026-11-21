@@ -1,4 +1,4 @@
-package com.hackathon.alerting.runbooks.api;
+package com.hackathon.alerting.runbooks.audit;
 
 import com.hackathon.alerting.runbooks.model.AuditLog;
 import tools.jackson.databind.JsonNode;

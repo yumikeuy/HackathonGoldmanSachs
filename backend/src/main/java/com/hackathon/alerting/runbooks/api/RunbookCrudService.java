@@ -160,7 +160,9 @@ public class RunbookCrudService {
     }
 
     private static String cleanFileName(MultipartFile file) {
-        String name = StringUtils.getFilename(file.getOriginalFilename());
+        String raw = file.getOriginalFilename();
+        String normalized = raw == null ? null : raw.replace('\\', '/');
+        String name = StringUtils.getFilename(normalized);
         if (name == null || name.isBlank()) {
             throw new InvalidRequestException("Runbook file name must not be blank");
         }

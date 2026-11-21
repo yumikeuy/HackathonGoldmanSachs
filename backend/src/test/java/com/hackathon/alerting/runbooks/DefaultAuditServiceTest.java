@@ -4,7 +4,7 @@ import com.hackathon.alerting.common.web.NotFoundException;
 import com.hackathon.alerting.delivery.model.Team;
 import com.hackathon.alerting.rules.model.Alert;
 import com.hackathon.alerting.rules.model.Rule;
-import com.hackathon.alerting.runbooks.api.AuditEntry;
+import com.hackathon.alerting.runbooks.audit.AuditEntry;
 import com.hackathon.alerting.runbooks.audit.AuditQueryService;
 import com.hackathon.alerting.runbooks.audit.DefaultAuditService;
 import com.hackathon.alerting.runbooks.model.AuditActions;

@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +24,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Runbooks CRUD, multipart upload, and raw file download ({@code /api/runbooks}, tag {@code runbooks} in {@code frontend/openapi.yaml}).
@@ -31,6 +35,13 @@ import java.util.List;
 @RequestMapping("/api/runbooks")
 @Tag(name = "runbooks")
 public class RunbookController {
+
+    private static final Map<String, MediaType> EXTRA_MEDIA_TYPES = Map.of(
+            "md", MediaType.TEXT_MARKDOWN,
+            "markdown", MediaType.TEXT_MARKDOWN,
+            "yaml", MediaType.APPLICATION_YAML,
+            "yml", MediaType.APPLICATION_YAML
+    );
 
     private final RunbookCrudService runbooks;
 
@@ -79,8 +90,7 @@ public class RunbookController {
     @Operation(summary = "Download the file as uploaded")
     public ResponseEntity<byte[]> download(@PathVariable long id) {
         RunbookFile file = runbooks.downloadFile(id);
-        MediaType mediaType = MediaTypeFactory.getMediaType(file.fileName())
-                .orElse(MediaType.APPLICATION_OCTET_STREAM);
+        MediaType mediaType = resolveMediaType(file.fileName());
         ContentDisposition disposition = ContentDisposition.inline()
                 .filename(file.fileName(), StandardCharsets.UTF_8)
                 .build();
@@ -88,5 +98,19 @@ public class RunbookController {
                 .contentType(mediaType)
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .body(file.content());
+    }
+
+    private static MediaType resolveMediaType(String fileName) {
+        return MediaTypeFactory.getMediaType(fileName)
+                .or(() -> extraMediaType(fileName))
+                .orElse(MediaType.APPLICATION_OCTET_STREAM);
+    }
+
+    private static Optional<MediaType> extraMediaType(String fileName) {
+        String ext = StringUtils.getFilenameExtension(fileName);
+        if (ext == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(EXTRA_MEDIA_TYPES.get(ext.toLowerCase(Locale.ROOT)));
     }
 }

@@ -1,5 +1,6 @@
 package com.hackathon.alerting.runbooks.api;
 
+import com.hackathon.alerting.runbooks.audit.AuditEntry;
 import com.hackathon.alerting.runbooks.audit.AuditQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
