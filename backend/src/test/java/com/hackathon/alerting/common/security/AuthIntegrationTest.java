@@ -138,7 +138,8 @@ class AuthIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).body(Map.of("name", source, "type", "http")).retrieve().toBodilessEntity();
 
         assertThat(status("POST", "/api/ingest/" + source, null, Map.of("a", 1))).isEqualTo(202);
-        assertThat(status("GET", "/actuator/health", null, null)).isEqualTo(200);
+        // open without a token; 200 or 503 depending on whether MailHog & co. run next to the test, never 401/403
+        assertThat(status("GET", "/actuator/health", null, null)).isIn(200, 503);
         assertThat(status("GET", "/v3/api-docs", null, null)).isEqualTo(200);
     }
 
