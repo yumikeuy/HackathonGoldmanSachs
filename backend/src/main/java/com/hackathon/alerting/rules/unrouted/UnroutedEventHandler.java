@@ -6,6 +6,7 @@ import com.hackathon.alerting.ingest.repository.EventRepository;
 import com.hackathon.alerting.rules.alert.AlertSummary;
 import com.hackathon.alerting.rules.dedup.DedupStore;
 import com.hackathon.alerting.rules.dedup.FingerprintCalculator;
+import com.hackathon.alerting.rules.metrics.ProcessingMetrics;
 import com.hackathon.alerting.rules.model.Alert;
 import com.hackathon.alerting.rules.model.Rule;
 import com.hackathon.alerting.rules.push.AlertPublisher;
@@ -35,21 +36,25 @@ public class UnroutedEventHandler {
     private final EventRepository events;
     private final AlertPublisher publisher;
     private final TransactionTemplate tx;
+    private final ProcessingMetrics metrics;
 
     public UnroutedEventHandler(FingerprintCalculator fingerprints, DedupStore dedup, AlertRepository alerts,
-                                EventRepository events, AlertPublisher publisher, TransactionTemplate tx) {
+                                EventRepository events, AlertPublisher publisher, TransactionTemplate tx,
+                                ProcessingMetrics metrics) {
         this.fingerprints = fingerprints;
         this.dedup = dedup;
         this.alerts = alerts;
         this.events = events;
         this.publisher = publisher;
         this.tx = tx;
+        this.metrics = metrics;
     }
 
     public void handle(EventEnvelope envelope) {
         String fingerprint = fingerprints.forUnrouted(envelope.sourceName(), envelope.rawPayload());
         if (!dedup.tryClaim(fingerprint, WINDOW_SEC)) {
             dedup.countRepeat(fingerprint, WINDOW_SEC);
+            metrics.repeat();
             // While the first event is still creating the alert the binding is pending: the row is kept unlinked.
             OptionalLong bound = dedup.binding(fingerprint).alertId();
             Long alertId = bound.isPresent() ? bound.getAsLong() : null;
@@ -65,9 +70,11 @@ public class UnroutedEventHandler {
         }
         dedup.bindAlert(fingerprint, created.alertId());
         if (created.summary().isPresent()) {
+            metrics.alertCreated(created.summary().get().severity());
             publisher.publish(created.summary().get());
         } else {
             dedup.countRepeat(fingerprint, WINDOW_SEC);
+            metrics.repeat();
         }
     }
 

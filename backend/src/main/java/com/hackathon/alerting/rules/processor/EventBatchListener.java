@@ -3,6 +3,8 @@ package com.hackathon.alerting.rules.processor;
 import com.hackathon.alerting.common.config.KafkaTopics;
 import com.hackathon.alerting.ingest.envelope.EventEnvelope;
 import com.hackathon.alerting.rules.dedup.SeenEvents;
+import com.hackathon.alerting.rules.metrics.ProcessingMetrics;
+import com.hackathon.alerting.rules.metrics.ProcessingMetrics.Outcome;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.listener.BatchListenerFailedException;
@@ -10,6 +12,8 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -33,11 +37,15 @@ public class EventBatchListener {
     private final JsonMapper json;
     private final SeenEvents seen;
     private final EventRouter router;
+    private final ProcessingMetrics metrics;
+    private final Clock clock;
 
-    public EventBatchListener(JsonMapper json, SeenEvents seen, EventRouter router) {
+    public EventBatchListener(JsonMapper json, SeenEvents seen, EventRouter router, ProcessingMetrics metrics, Clock clock) {
         this.json = json;
         this.seen = seen;
         this.router = router;
+        this.metrics = metrics;
+        this.clock = clock;
     }
 
     @KafkaListener(id = LISTENER_ID, topics = KafkaTopics.EVENTS_INGEST, groupId = KafkaTopics.PROCESSOR_GROUP, batch = "true")
@@ -57,6 +65,7 @@ public class EventBatchListener {
     private void process(ConsumerRecord<String, String> record) {
         EventEnvelope envelope = json.readValue(record.value(), EventEnvelope.class);
         if (!seen.markSeen(envelope.eventId())) {
+            metrics.eventProcessed(Outcome.DUPLICATE);
             return;
         }
         try {
@@ -65,5 +74,6 @@ public class EventBatchListener {
             seen.forget(envelope.eventId());
             throw e;
         }
+        metrics.processingDelay(Duration.between(envelope.ingestedAt(), clock.instant()));
     }
 }

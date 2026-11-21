@@ -1,0 +1,2 @@
+{"name": "Team Rates",
+ "condition": {"path": "desk", "op": "==", "value": "rates"}}

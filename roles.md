@@ -24,7 +24,7 @@ Phase 1's split is in git history (`git show 36d19b8:roles.md`).
 | Condition engine (all operators, strict / flexible), audit trail + `GET /api/alerts/{id}/audit` | done (Role 3) |
 | **Runbooks API** (CRUD, multipart upload, file download, 413 over 10 MB) | done (Role 3) — branch `role3/runbooks-api`, fixed for today's `main` |
 | **Runbooks**: cache, selection (`RunbookService.attach` is still a no-op) | **phase 2 — Role 3** |
-| **Generator** `POST /api/dev/generate`, **k6 load test** | **phase 2 — Role 2** (moved from Role 3) |
+| **Generator** `POST /api/dev/generate`, **k6 load test**, processing metrics, team suggestions | done (Role 2) — branch `role2/generator-load-metrics`; results in `docs/load-testing.md` |
 | **File source** (tail a log file), **seed data**, **smoke test**, **README / docs** | **phase 2 — Role 1** |
 | Metrics, team suggestions for unrouted alerts (bonus), hardening | phase 2 — every role in its area |
 | Frontend | Role 4, in progress separately |
@@ -144,6 +144,10 @@ a line appended to the log file becomes an alert.
 **Mission:** prove the pipeline under load (500 identical events per minute → one alert counted 500), give the demo a
 traffic generator, and make processing observable.
 
+**Status: all tasks done** (branch `role2/generator-load-metrics`) — generator, k6 (`burst.js` passes on the compose
+stack), metrics, team suggestions, `Clock`, audit assertions, `docs/processing.md`, `docs/load-testing.md`.
+Not done (optional): auto-close of `per_window` alerts of earlier windows — documented as a known limit.
+
 ### Tasks, in order
 
 0. ~~**Fix the flaky end-to-end test**~~ — **done** (branch `role2/fix-config-reload-race`): config reloads arrive
@@ -160,7 +164,8 @@ traffic generator, and make processing observable.
      values, e.g. `{{seq}}`, `{{uuid}}`, `{{randInt:1:100}}`, `{{oneOf:EUR|USD}}`; describe them in the `GenerateRequest`
      schema (your section of `openapi.yaml`).
    - Remove the `x-planned` marker of the operation in the same PR.
-2. **k6 load test** (`loadtest/`), run with `docker run --network host -i grafana/k6 run - < loadtest/<script>.js`.
+2. **k6 load test** (`loadtest/`), run with `docker run --rm --network host -v "$PWD/loadtest":/scripts grafana/k6 run /scripts/<script>.js`
+   (the folder is mounted because the scripts read `payloads/`).
    - `setup()` creates its own source, team and rule over the REST API (unique names), so the script works on any database.
    - `burst.js`: 500 identical events within one minute → `GET /api/alerts?teamId=` returns exactly one alert with
      `occurrencesCount = 500` (poll a few seconds); thresholds fail the run otherwise.

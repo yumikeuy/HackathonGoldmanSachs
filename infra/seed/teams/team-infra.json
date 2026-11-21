@@ -1,0 +1,5 @@
+{"name": "Team Infra",
+ "condition": {"or": [
+   {"path": "metric", "op": "in", "value": ["cpu", "memory"]},
+   {"path": "message", "op": "contains", "value": "ERROR"}
+ ]}}

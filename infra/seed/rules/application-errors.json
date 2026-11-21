@@ -1,0 +1,5 @@
+{"teamId": __TEAM_ID__, "name": "Application errors in logs",
+ "condition": {"path": "message", "op": "contains", "value": "ERROR"},
+ "assignedSeverity": "MEDIUM", "channels": ["EMAIL", "UI"],
+ "groupByPaths": [], "groupMode": "while_open", "dedupWindowSec": 300,
+ "presentation": {"title": "Log: {{message}}"}}

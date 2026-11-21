@@ -4,6 +4,7 @@ import com.hackathon.alerting.common.config.KafkaTopics;
 import com.hackathon.alerting.ingest.model.EventStatus;
 import com.hackathon.alerting.ingest.recent.RecentEvents;
 import com.hackathon.alerting.ingest.repository.EventRepository;
+import com.hackathon.alerting.ingest.source.FileTailSources;
 import com.hackathon.alerting.support.KafkaTestConfiguration;
 import com.hackathon.alerting.support.PostgresTestConfiguration;
 import com.hackathon.alerting.support.RedisTestConfiguration;
@@ -13,6 +14,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,6 +30,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +63,8 @@ class IngestIntegrationTest {
     private RecentEvents recentEvents;
     @Autowired
     private EventRepository events;
+    @Autowired
+    private FileTailSources fileSources;
 
     private RestClient http() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
@@ -112,6 +119,27 @@ class IngestIntegrationTest {
             assertThat(envelope.get("source_type").asString()).isEqualTo("kafka");
             assertThat(envelope.at("/raw_payload/marker").asString()).isEqualTo(marker);
         });
+    }
+
+    @Test
+    void linesAppendedToAFileSourceArriveInOrder(@TempDir Path dir) throws Exception {
+        String source = "file-" + UUID.randomUUID();
+        Path log = dir.resolve("app.log");
+        Files.writeString(log, "{\"before\":\"start\"}\n");
+        createSource(Map.of("name", source, "type", "file", "config", Map.of("path", log.toString())));
+        await().atMost(Duration.ofSeconds(30)).until(() -> fileSources.isTailing(source));
+
+        Files.writeString(log, "{\"level\":\"ERROR\",\"n\":1}\nplain text line\n", StandardOpenOption.APPEND);
+
+        JsonNode first = awaitEnvelope(e -> e.get("source_name").asString().equals(source));
+        assertThat(first.get("source_type").asString()).isEqualTo("file");
+        assertThat(first.at("/raw_payload/n").asInt()).isEqualTo(1);
+        JsonNode second = awaitEnvelope(e -> e.get("source_name").asString().equals(source)
+                && e.at("/raw_payload/message").asString().equals("plain text line"));
+        assertThat(second).isNotNull();
+        assertThat(http().post().uri("/api/sources").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("name", "file-" + UUID.randomUUID(), "type", "file")).retrieve().toBodilessEntity()
+                .getStatusCode().value()).isEqualTo(400);
     }
 
     @Test
