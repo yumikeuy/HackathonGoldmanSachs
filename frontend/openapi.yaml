@@ -46,13 +46,20 @@ paths:
     post:
       tags: [ingest]
       summary: Accept an event of any JSON shape
-      description: Responds 202 only after Kafka acknowledged the envelope.
+      description: |
+        Responds 202 only after Kafka acknowledged the envelope. Limits: body ≤ 1 MB (413), JSON nesting ≤ 64 (400),
+        ≤ 1000 events/s per source (429 with `Retry-After`). A source with an API key requires `X-Api-Key` (401).
       parameters:
         - name: source
           in: path
           required: true
           description: Name of an active source (`sources.name`).
           schema: { type: string, example: payments-monitoring }
+        - name: X-Api-Key
+          in: header
+          required: false
+          description: The source's API key — required only if one was generated (`POST /api/sources/{id}/api-key`).
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -65,7 +72,22 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/IngestAccepted' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: The source requires an API key and `X-Api-Key` is missing or wrong
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: Body larger than 1 MB
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429':
+          description: The source exceeded its rate limit — retry after `Retry-After` seconds
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '503':
           description: Kafka unavailable — retry later
           content:
@@ -184,6 +206,28 @@ paths:
       summary: Delete a source
       responses:
         '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/sources/{id}/api-key:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [config]
+      summary: Generate (or rotate) the API key of an http source
+      description: |
+        From now on `POST /api/ingest/{name}` requires the key in `X-Api-Key`. The key is returned **only in this
+        response**; the server stores its SHA-256.
+      responses:
+        '201':
+          description: The new key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SourceApiKey' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [config]
+      summary: Remove the API key — the source accepts events without a key again
+      responses:
+        '204': { description: Removed }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/teams:
@@ -841,10 +885,18 @@ components:
       allOf:
         - $ref: '#/components/schemas/SourceInput'
         - type: object
-          required: [id, createdAt]
+          required: [id, createdAt, apiKeyRequired]
           properties:
             id: { type: integer, format: int64 }
+            apiKeyRequired: { type: boolean, description: 'Whether `POST /api/ingest/{name}` needs `X-Api-Key`.' }
             createdAt: { type: string, format: date-time }
+    SourceApiKey:
+      type: object
+      required: [sourceName, apiKey, header]
+      properties:
+        sourceName: { type: string, example: payments-monitoring }
+        apiKey: { type: string, description: Shown once — store it in the sending system., example: src_q0J8vR... }
+        header: { type: string, example: X-Api-Key }
     SourceInput:
       type: object
       required: [name, type]

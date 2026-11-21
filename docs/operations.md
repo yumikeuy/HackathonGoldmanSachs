@@ -39,6 +39,11 @@ overrides the hosts with environment variables.
 | — | `alerting.outbox.cleanup-cron` | hourly | deletion of SENT rows older than a day |
 | — | `alerting.file-source.poll-interval` | `500ms` | how often file sources are checked |
 | — | `alerting.mail.from` | `alerts@alerting.local` | sender of emails |
+| `INGEST_RATE_LIMIT` | `alerting.ingest.rate-limit-per-second` | 1000 | events/s per HTTP source (429 above; 0 disables) |
+| `ALLOWED_ORIGINS` | `alerting.security.allowed-origins` | `http://localhost:*,http://127.0.0.1:*` | browser origins allowed cross-origin (CORS, WebSocket) |
+| — | `alerting.ingest.max-body-size`, `max-json-depth` | `1MB`, 64 | event size and nesting limits |
+
+Security settings and their reasons: [security.md](security.md).
 
 ## Seed data
 
@@ -98,6 +103,9 @@ cd backend && docker run --rm --network host -v /var/run/docker.sock:/var/run/do
 |---|---|
 | `POST /api/ingest/...` → 503 | Kafka is down or slow: `docker compose ps kafka`, `docker compose logs kafka` |
 | → 404 | the source does not exist or is inactive: `GET /api/sources` |
+| → 401 | the source has an API key (`apiKeyRequired: true`): send `X-Api-Key`, or remove the key with `DELETE /api/sources/{id}/api-key` |
+| → 429 | more than `INGEST_RATE_LIMIT` events/s from one source — slow down or raise the limit |
+| UI on another port cannot call the API / open `/ws` | add its origin to `ALLOWED_ORIGINS` |
 | Event accepted but no alert | `GET /api/ingest/lag` (processor behind?); `GET /api/alerts?unrouted=true` (no team matched); `GET /api/events/failed` (processing failed) |
 | Kafka source not consumed | `config.topic` correct and source active; logs: `Listening to Kafka source` |
 | File source not ingesting | the path is **inside the container** (`/data/logs/...` = `./infra/logs/...`); only lines appended after the source was created are read; logs: `Tailing file source` |

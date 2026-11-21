@@ -1,5 +1,6 @@
 package com.hackathon.alerting.common.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -11,7 +12,9 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  * Server code pushes with {@code SimpMessagingTemplate.convertAndSend(destination, dto)}.
  *
  * <p>The UI only subscribes; there are no client-to-server STOMP messages ({@code /app} is reserved).
- * All origins are allowed because the service has no authentication and the dev UI runs on another port.
+ * Cross-origin connections are accepted only from {@code alerting.security.allowed-origins} (the UI served by the
+ * service itself is same-origin and always allowed), so a foreign web page cannot read the live alert feed through
+ * an operator's browser (docs/security.md).
  */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSocketMessageBroker
@@ -19,9 +22,15 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     public static final String ENDPOINT = "/ws";
 
+    private final String[] allowedOrigins;
+
+    public WebSocketConfig(@Value("${alerting.security.allowed-origins}") String[] allowedOrigins) {
+        this.allowedOrigins = allowedOrigins;
+    }
+
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint(ENDPOINT).setAllowedOriginPatterns("*");
+        registry.addEndpoint(ENDPOINT).setAllowedOriginPatterns(allowedOrigins);
     }
 
     @Override

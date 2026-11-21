@@ -71,7 +71,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus
+        # info is not exposed; health shows no details to anonymous callers (docs/security.md)
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
 
 alerting:
   dev:
@@ -82,6 +86,15 @@ alerting:
   ingest:
     # How long POST /api/ingest waits for the Kafka acknowledgement before answering 503
     send-timeout: 5s
+    # Limits against hostile events (docs/security.md): larger bodies → 413, deeper JSON → 400
+    max-body-size: 1MB
+    max-json-depth: 64
+    # Events per second per HTTP source (Redis rl:ingest:{source}); over it → 429. 0 disables.
+    rate-limit-per-second: ${INGEST_RATE_LIMIT:1000}
+  security:
+    # Browser origins allowed to call /api and open /ws cross-origin (the UI served by the service is same-origin).
+    # Comma-separated patterns.
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
   file-source:
     # How often file sources (type "file") check their file for new lines
     poll-interval: 500ms

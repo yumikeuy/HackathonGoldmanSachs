@@ -9,9 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import java.nio.file.Path;
@@ -37,15 +35,15 @@ public class FileTailSources implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(FileTailSources.class);
 
     private final EventIngestor ingestor;
-    private final JsonMapper json;
+    private final PayloadParser parser;
     private final Duration pollInterval;
     private final Map<String, Running> running = new HashMap<>();
     private volatile boolean started;
 
-    public FileTailSources(EventIngestor ingestor, JsonMapper json,
+    public FileTailSources(EventIngestor ingestor, PayloadParser parser,
                            @Value("${alerting.file-source.poll-interval:500ms}") Duration pollInterval) {
         this.ingestor = ingestor;
-        this.json = json;
+        this.parser = parser;
         this.pollInterval = pollInterval;
     }
 
@@ -113,10 +111,9 @@ public class FileTailSources implements SmartLifecycle {
     JsonNode toPayload(String line) {
         String trimmed = line.strip();
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            try {
-                return json.readTree(trimmed);
-            } catch (JacksonException e) {
-                // not JSON after all
+            JsonNode parsed = parser.parseOrText(trimmed);
+            if (!parsed.isString()) {
+                return parsed;
             }
         }
         return JsonNodeFactory.instance.objectNode().put("message", line);
